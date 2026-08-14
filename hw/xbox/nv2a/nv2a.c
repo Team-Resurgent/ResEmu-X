@@ -21,6 +21,23 @@
 
 #include "hw/xbox/nv2a/nv2a_int.h"
 #include "qemu/main-loop.h"
+#include "system/ioport.h"
+#include "system/address-spaces.h"
+
+/* Legacy VGA I/O ports (offsets from 0x3b0). Real NVIDIA GPUs, including the NV2A, decode the
+ * standard VGA-compatible I/O ports so that VGA BIOS / DOS / real-mode software works; the NV2A's
+ * VGACommonState core implements all of these (CRTC, sequencer, attribute + graphics controllers,
+ * the 0x3c8/0x3c9 DAC, and the 0x3da input-status register with vertical-retrace timing). Exposing
+ * them lets legacy graphics code run - e.g. DOOM's I_WaitVBL, which spins on the 0x3da retrace bit
+ * and otherwise hangs forever when nothing answers the port. */
+static const MemoryRegionPortio nv2a_vga_portio_list[] = {
+    { 0x04,  2, 1, .read = vga_ioport_read, .write = vga_ioport_write }, /* 0x3b4 CRTC (mono)      */
+    { 0x0a,  1, 1, .read = vga_ioport_read, .write = vga_ioport_write }, /* 0x3ba status/feat (m)  */
+    { 0x10, 16, 1, .read = vga_ioport_read, .write = vga_ioport_write }, /* 0x3c0 attr/seq/dac/gc  */
+    { 0x24,  2, 1, .read = vga_ioport_read, .write = vga_ioport_write }, /* 0x3d4 CRTC (color)     */
+    { 0x2a,  1, 1, .read = vga_ioport_read, .write = vga_ioport_write }, /* 0x3da status/feat (c)  */
+    PORTIO_END_OF_LIST(),
+};
 
 void nv2a_update_irq(NV2AState *d)
 {
@@ -248,6 +265,14 @@ static void nv2a_init_vga(NV2AState *d)
     vga->get_bpp = nv2a_get_bpp;
     vga->get_params = nv2a_get_params;
     // vga->overlay_draw_line = nv2a_overlay_draw_line;
+
+    /* Expose the VGA core's legacy I/O ports (0x3b0-0x3df) like real VGA-compatible NVIDIA hardware,
+     * so VGA/DOS/real-mode software can program the CRTC/sequencer/DAC and poll 0x3da for retrace.
+     * (The 0xA0000-0xBFFFF VGA memory aperture is intentionally NOT mapped, so system RAM there is
+     * unchanged - only the I/O ports are added.) */
+    portio_list_init(&vga->vga_port_list, OBJECT(d), nv2a_vga_portio_list, vga, "nv2a-vga");
+    portio_list_set_flush_coalesced(&vga->vga_port_list);
+    portio_list_add(&vga->vga_port_list, get_system_io(), 0x3b0);
 
     d->hw_ops = *vga->hw_ops;
     d->hw_ops.gfx_update = nv2a_vga_gfx_update;
