@@ -7,6 +7,10 @@ name: Build
 on:
   push:
     branches: [teamresurgent]
+    paths-ignore:
+      - '**.md'
+      - 'LICENSE'
+      - 'COPYING'
   workflow_dispatch:
 
 concurrency:
