@@ -35,6 +35,10 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+      - name: Install curl
+        # The toolchain image lacks curl, which the dsp56300 subproject needs
+        # to fetch its prebuilt binary during meson setup.
+        run: apt-get update && apt-get install -qy curl
       - name: Cache ccache
         uses: actions/cache@v4
         with:
