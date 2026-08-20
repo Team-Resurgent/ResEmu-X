@@ -1,78 +1,139 @@
 name: Build
 
+# Simple CI for the Team-Resurgent fork: build the Windows, Linux and macOS
+# executables on every push to teamresurgent and publish them as a rolling
+# "latest" prerelease.
+
 on:
-  workflow_call:
-    inputs:
-      ref:
-        description: Git ref (commit, branch, or tag) to build
-        required: true
-        type: string
-    outputs:
-      pkg_version:
-        description: Build version
-        value: ${{ jobs.source.outputs.pkg_version }}
+  push:
+    branches: [teamresurgent]
+  workflow_dispatch:
+
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: write
 
 jobs:
-  source:
-    name: Create source package
+  windows:
+    name: Windows (x86_64)
     runs-on: ubuntu-latest
-    outputs:
-      pkg_version: ${{ steps.version.outputs.pkg_version }}
+    container:
+      image: ghcr.io/xemu-project/xemu-win64-toolchain-gcc:sha-2881edd
+    defaults:
+      run:
+        shell: bash
+    env:
+      CCACHE_DIR: /tmp/xemu-ccache
     steps:
-    - name: Clone tree
-      uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v4
-      with:
-        fetch-depth: 0
-        ref: ${{ inputs.ref }}
-    - name: Install dependencies
-      run: sudo apt-get install meson
-    - name: Determine release version
-      id: version
-      run: |
-        if TAG=$(git describe --tags --match 'v*' 2>/dev/null); then
-          echo "pkg_version=${TAG#v}" >> $GITHUB_OUTPUT
-        else
-          SHORT_HASH=$(git rev-parse --short HEAD)
-          echo "pkg_version=0.0.0-0-unofficial-${SHORT_HASH}" >> $GITHUB_OUTPUT
-        fi
-    - name: Create source package
-      id: package
-      run: |
-        pkg_name="xemu-${{ steps.version.outputs.pkg_version }}"
-        tar_filename="${pkg_name}.tar"
-        tar_prefix="./${pkg_name}/"
-        ./scripts/archive-source.sh ${tar_filename} ${tar_prefix}
-
-        echo -n ${{ github.sha }} > XEMU_COMMIT
-        echo -n ${{ steps.version.outputs.pkg_version }} > XEMU_VERSION
-        tar -r --file "${tar_filename}" --transform "s,^./,${tar_prefix}," ./XEMU_COMMIT ./XEMU_VERSION
-
-        zstd "${tar_filename}"
-        echo "pkg_filename=${tar_filename}.zst" >> $GITHUB_OUTPUT
-    - name: Upload source package artifact
-      uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v4
-      with:
-        name: src
-        path: ${{ steps.package.outputs.pkg_filename }}
-        compression-level: 0
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Cache ccache
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.CCACHE_DIR }}
+          key: ccache-win64-${{ github.sha }}
+          restore-keys: ccache-win64-
+      - name: Build
+        run: ./build.sh -p win64-cross
+      - name: Package
+        run: cd dist && zip -r ../xemu-win64.zip .
+      - uses: actions/upload-artifact@v4
+        with:
+          name: xemu-win64
+          path: xemu-win64.zip
 
   linux:
-    name: Linux
-    needs: source
-    uses: ./.github/workflows/build-linux.yml
-    with:
-      pkg_version: ${{ needs.source.outputs.pkg_version }}
+    name: Linux (x86_64)
+    runs-on: ubuntu-22.04
+    env:
+      CCACHE_DIR: /tmp/xemu-ccache
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Install dependencies
+        run: |
+          sudo apt-get -qy update
+          sudo apt-get -qy install \
+            build-essential ccache git cmake ninja-build zip \
+            python3 python3-pip python3-venv python3-tomli python3-yaml \
+            libepoxy-dev libpixman-1-dev libsdl2-dev libsamplerate0-dev \
+            zlib1g-dev libssl-dev libpcap-dev libslirp-dev libvulkan-dev \
+            libusb-1.0-0-dev libcurl4-gnutls-dev libpipewire-0.3-dev libfuse2
+      - name: Cache ccache
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.CCACHE_DIR }}
+          key: ccache-linux-${{ github.sha }}
+          restore-keys: ccache-linux-
+      - name: Build
+        run: ./build.sh
+      - name: Package
+        run: cd dist && zip -r ../xemu-linux-x86_64.zip .
+      - uses: actions/upload-artifact@v4
+        with:
+          name: xemu-linux-x86_64
+          path: xemu-linux-x86_64.zip
 
   macos:
-    name: macOS
-    needs: source
-    uses: ./.github/workflows/build-macos.yml
-    with:
-      pkg_version: ${{ needs.source.outputs.pkg_version }}
+    name: macOS (${{ matrix.arch }})
+    runs-on: macos-15
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: [arm64, x86_64]
+    env:
+      CCACHE_DIR: /tmp/xemu-ccache
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Install dependencies
+        run: |
+          brew install ccache coreutils dylibbundler
+          pip3 install --break-system-packages pyyaml requests \
+            || pip3 install pyyaml requests
+      - name: Cache ccache
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.CCACHE_DIR }}
+          key: ccache-macos-${{ matrix.arch }}-${{ github.sha }}
+          restore-keys: ccache-macos-${{ matrix.arch }}-
+      - name: Build
+        run: |
+          export PATH="/opt/homebrew/opt/ccache/libexec:$PATH"
+          ./build.sh -a ${{ matrix.arch }}
+      - name: Package
+        run: cd dist && zip -r ../xemu-macos-${{ matrix.arch }}.zip .
+      - uses: actions/upload-artifact@v4
+        with:
+          name: xemu-macos-${{ matrix.arch }}
+          path: xemu-macos-${{ matrix.arch }}.zip
 
-  windows:
-    name: Windows
-    needs: source
-    uses: ./.github/workflows/build-windows.yml
-    with:
-      pkg_version: ${{ needs.source.outputs.pkg_version }}
+  release:
+    name: Publish latest
+    needs: [windows, linux, macos]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+      - name: Publish rolling 'latest' release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          shopt -s globstar nullglob
+          files=(artifacts/**/*.zip)
+          echo "Attaching: ${files[*]}"
+          gh release delete latest --repo "$GITHUB_REPOSITORY" --yes --cleanup-tag 2>/dev/null || true
+          gh release create latest \
+            --repo "$GITHUB_REPOSITORY" \
+            --target "$GITHUB_SHA" \
+            --title "Latest (teamresurgent)" \
+            --notes "Automated build of ${GITHUB_SHA}." \
+            --prerelease \
+            "${files[@]}"
