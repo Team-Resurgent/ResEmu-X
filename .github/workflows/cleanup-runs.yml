@@ -1,0 +1,46 @@
+name: Cleanup old runs
+
+# Deletes old Actions run history. Run it on demand (Actions -> Cleanup old runs
+# -> Run workflow) to purge the leftover runs from the removed upstream
+# workflows, and it also runs daily to keep only recent runs.
+
+on:
+  workflow_dispatch:
+    inputs:
+      retain_days:
+        description: "Keep runs from the last N days (0 = keep only today's)"
+        default: "0"
+  schedule:
+    - cron: "30 6 * * *" # daily 06:30 UTC
+
+permissions:
+  actions: write
+
+concurrency:
+  group: cleanup-runs
+
+jobs:
+  cleanup:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Delete workflow runs older than the cutoff
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RETAIN_DAYS: ${{ github.event.inputs.retain_days || '0' }}
+        run: |
+          set -uo pipefail
+          cutoff=$(date -u -d "today -${RETAIN_DAYS} days" +%Y-%m-%d)
+          echo "Repo: ${GITHUB_REPOSITORY}"
+          echo "Deleting workflow runs created before ${cutoff} (UTC)"
+
+          gh api --paginate "repos/${GITHUB_REPOSITORY}/actions/runs" \
+            --jq '.workflow_runs[] | [(.created_at[0:10]), (.id|tostring), .name] | @tsv' \
+          | while IFS=$'\t' read -r created id name; do
+              if [[ "$created" < "$cutoff" ]]; then
+                echo "delete ${id}  (${created})  ${name}"
+                gh api -X DELETE "repos/${GITHUB_REPOSITORY}/actions/runs/${id}" \
+                  >/dev/null 2>&1 || echo "  (skipped: in-progress or protected)"
+              fi
+            done
+
+          echo "Done."
