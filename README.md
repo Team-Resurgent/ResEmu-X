@@ -56,8 +56,7 @@ Features on the `teamresurgent` branch that are not (yet) in upstream xemu:
 
 ## Downloads
 
-Every push to `teamresurgent` builds Windows, Linux, and macOS (arm64 + x86_64)
-via GitHub Actions and publishes them to the rolling
+Prebuilt Windows, Linux, and macOS binaries:
 [**latest** release](../../releases/tag/latest).
 
 ## Building from source
