@@ -5,14 +5,22 @@
 **A fork of [xemu](https://xemu.app), the original Xbox emulator
 ([xemu-project/xemu](https://github.com/xemu-project/xemu)).**
 
-<a href="https://github.com/Team-Resurgent/xemu-cci/blob/teamresurgent/LICENSE"><img src="https://img.shields.io/badge/License-GPLv2-blue.svg" alt="License: GPL v2"></a>
-<a href="https://github.com/Team-Resurgent/xemu-cci/actions/workflows/build.yml"><img src="https://github.com/Team-Resurgent/xemu-cci/actions/workflows/build.yml/badge.svg" alt="Build"></a>
-<a href="https://discord.gg/VcdSfajQGK"><img src="https://img.shields.io/badge/chat-on%20discord-7289da.svg?logo=discord" alt="Discord"></a>
-<a href="https://ko-fi.com/J3J7L5UMN"><img src="https://ko-fi.com/img/githubbutton_sm.svg" alt="ko-fi"></a>
-<a href="https://www.patreon.com/teamresurgent"><img src="https://img.shields.io/badge/Patreon-F96854?style=for-the-badge&logo=patreon&logoColor=white" alt="Patreon"></a>
-<a href="https://github.com/Team-Resurgent/xemu-cci/releases/latest"><img src="https://img.shields.io/badge/download-latest-brightgreen.svg?style=for-the-badge&logo=github" alt="Download"></a>
-
 </div>
+
+<p align="center">
+  <a href="https://github.com/Team-Resurgent/xemu-cci/blob/teamresurgent/LICENSE"><img src="https://img.shields.io/badge/License-GPLv2-blue.svg" alt="License: GPL v2"></a>
+  <a href="https://github.com/Team-Resurgent/xemu-cci/actions/workflows/build.yml"><img src="https://github.com/Team-Resurgent/xemu-cci/actions/workflows/build.yml/badge.svg" alt="Build"></a>
+  <a href="https://discord.gg/VcdSfajQGK"><img src="https://img.shields.io/badge/chat-on%20discord-7289da.svg?logo=discord" alt="Discord"></a>
+</p>
+
+<p align="center">
+  <a href="https://ko-fi.com/J3J7L5UMN"><img src="https://ko-fi.com/img/githubbutton_sm.svg" alt="ko-fi"></a>
+  <a href="https://www.patreon.com/teamresurgent"><img src="https://img.shields.io/badge/Patreon-F96854?style=for-the-badge&logo=patreon&logoColor=white" alt="Patreon"></a>
+</p>
+
+<p align="center">
+  <a href="https://github.com/Team-Resurgent/xemu-cci/releases/latest"><img src="https://img.shields.io/badge/download-latest-brightgreen.svg?style=for-the-badge&logo=github" alt="Download"></a>
+</p>
 
 This repository is a fork of xemu maintained by **Team-Resurgent**. The default
 `teamresurgent` branch tracks upstream xemu and adds the enhancements listed
