@@ -62,16 +62,9 @@ via GitHub Actions and publishes them to the rolling
 
 ## Building from source
 
-The build works exactly as upstream xemu. In short:
-
-```sh
-git clone https://github.com/Team-Resurgent/xemu-cci
-cd xemu-cci
-./build.sh              # native (Linux/macOS); use -p win64-cross for Windows
-```
-
-See upstream's [build documentation](https://github.com/xemu-project/xemu#building)
-for platform prerequisites and options.
+The build works exactly as upstream xemu — see its
+[build documentation](https://github.com/xemu-project/xemu#building) for
+platform prerequisites and options.
 
 ## Credits & license
 
