@@ -51,9 +51,11 @@
 
 extern MemoryRegion *rom_memory__; //FIXME
 
-/* Set once the Xenium device is realized, so the NV2A hooks (PRMCIO detection,
- * PCRTC banking) only take effect when the modchip is actually attached. */
-bool xenium_present = false;
+/* True when the Xenium modchip is active. Set early by the machine setup (vl.c)
+ * so the normal BIOS flash init is skipped, and also on device realize. Gates
+ * the NV2A hooks (PRMCIO detection, PCRTC banking) so stock behaviour is used
+ * when the modchip is disabled. */
+bool xenium_enabled = false;
 
 uint8_t xenium_raw[XENIUM_FLASH_SIZE];
 uint8_t mcpx_raw[MCPX_SIZE];
@@ -364,7 +366,7 @@ static void xenium_realize(DeviceState *dev, Error **errp)
     ISADevice *isa = ISA_DEVICE(dev);
     Error *err = NULL;
 
-    xenium_present = true;
+    xenium_enabled = true;
 
     //Read Xenium Flash Dump (2MB file)
     int fd = qemu_open(s->rom_file, O_RDONLY | O_BINARY, NULL);
