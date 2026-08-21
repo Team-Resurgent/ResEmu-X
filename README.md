@@ -56,9 +56,9 @@ Features on the `teamresurgent` branch that are not (yet) in upstream xemu:
 - **NV2A signed texture formats** — adds the missing `V16U16` signed texture
   format (and HILO hemisphere dot-map handling).
 
-- **`rdpmc` compatibility stub** — the `rdpmc` instruction returns 0 instead of
-  raising an invalid-opcode exception (`#UD`), for compatibility with certain
-  titles / fast-CPU setups.
+- **`rdpmc` compatibility stub** — the `rdpmc` performance-counter instruction
+  returns 0 instead of faulting, so titles that use it keep running instead of
+  crashing (helps with certain titles / fast-CPU setups).
 
 ## Downloads
 
