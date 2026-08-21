@@ -31,6 +31,8 @@
 #include "hw/char/serial.h"
 #include "hw/isa/isa.h"
 #include "qapi/error.h"
+#include "qemu/timer.h"
+#include "qemu/notify.h"
 
 #define XENIUM_REGISTER_BASE 0xEE
 #define XENIUM_REGISTER0 0
@@ -47,6 +49,11 @@
 #define XENIUM_FLASH_DEV_ID (0xC4)
 #define XENIUM_FLASH_SIZE (2 * 1024 * 1024)
 #define XENIUM_MAX_BANK_SIZE (1024 * 1024)
+
+/* After the last flash write/erase, wait this long with no further activity
+ * before persisting the image back to the ROM file. Debouncing coalesces the
+ * thousands of byte-program cycles of a bank flash into a single disk write. */
+#define XENIUM_FLASH_FLUSH_DELAY_MS 2000
 #define MCPX_SIZE (512)
 
 extern MemoryRegion *rom_memory__; //FIXME
@@ -129,6 +136,11 @@ typedef struct XeniumState {
     char *rom_file;
     XeniumMemoryState flash_state;
     unsigned char flash_cycle;
+
+    // Deferred (debounced) write-back of the flash image to rom_file
+    QEMUTimer *flush_timer;
+    Notifier exit_notifier;
+    bool flash_dirty;
 } XeniumState;
 
 #define XENIUM_DEVICE(obj) \
@@ -197,6 +209,88 @@ static const MemoryRegionOps xenium_io_ops = {
     },
 };
 
+/* Erase the flash sector that contains absolute flash address `addr`, setting
+ * every byte to 0xFF. The sector geometry mirrors the real Xenium flash (and
+ * the PrometheOS driver's isEraseMemOffset()): uniform 64K sectors across the
+ * main region, with smaller 32K/8K/16K boot sectors at the very top of the
+ * 2MB device. Boundaries are all power-of-two aligned so a mask finds the
+ * sector base. */
+static void xenium_erase_sector(uint32_t addr)
+{
+    uint32_t sector_size;
+
+    if (addr <= 0x1EFFFF) {
+        sector_size = 64 * 1024;
+    } else if (addr <= 0x1F7FFF) {
+        sector_size = 32 * 1024;
+    } else if (addr <= 0x1FBFFF) {
+        sector_size = 8 * 1024;
+    } else {
+        sector_size = 16 * 1024;
+    }
+
+    uint32_t base = addr & ~(sector_size - 1);
+    if (base >= XENIUM_FLASH_SIZE) {
+        return;
+    }
+    if (base + sector_size > XENIUM_FLASH_SIZE) {
+        sector_size = XENIUM_FLASH_SIZE - base;
+    }
+
+    DPRINTF("%s Erasing sector base=%08x size=%u (from addr %08x)\n",
+        __func__, base, sector_size, addr);
+    memset(&xenium_raw[base], 0xFF, sector_size);
+}
+
+/* Persist the in-memory flash image back to the backing ROM file. Invoked from
+ * the debounce timer a short time after the last write/erase, and again from an
+ * exit notifier so a flash issued just before quitting is not lost. */
+static void xenium_flash_flush(XeniumState *s)
+{
+    if (!s->flash_dirty || s->rom_file == NULL || *s->rom_file == '\0') {
+        return;
+    }
+
+    int fd = qemu_open(s->rom_file, O_WRONLY | O_BINARY, NULL);
+    if (fd < 0) {
+        fprintf(stderr, "xenium: could not open '%s' to persist flash\n", s->rom_file);
+        return;
+    }
+
+    ssize_t written = write(fd, xenium_raw, XENIUM_FLASH_SIZE);
+    close(fd);
+
+    if (written != (ssize_t)XENIUM_FLASH_SIZE) {
+        fprintf(stderr, "xenium: short write persisting flash to '%s' (%zd/%d)\n",
+                s->rom_file, written, XENIUM_FLASH_SIZE);
+        return;
+    }
+
+    s->flash_dirty = false;
+    DPRINTF("%s Flash image persisted to '%s'\n", __func__, s->rom_file);
+}
+
+static void xenium_flash_flush_cb(void *opaque)
+{
+    xenium_flash_flush((XeniumState *)opaque);
+}
+
+static void xenium_flash_exit_notify(Notifier *n, void *opaque)
+{
+    XeniumState *s = container_of(n, XeniumState, exit_notifier);
+    xenium_flash_flush(s);
+}
+
+/* Mark the flash image modified and (re)arm the debounce timer. */
+static void xenium_flash_mark_dirty(XeniumState *s)
+{
+    s->flash_dirty = true;
+    if (s->flush_timer) {
+        timer_mod(s->flush_timer,
+            qemu_clock_get_ms(QEMU_CLOCK_REALTIME) + XENIUM_FLASH_FLUSH_DELAY_MS);
+    }
+}
+
 static uint64_t flash_read(void *opaque, hwaddr offset, unsigned size)
 {
     XeniumState *s = opaque;
@@ -234,6 +328,10 @@ static uint64_t flash_read(void *opaque, hwaddr offset, unsigned size)
             case 0:
                 DPRINTF("%s Sending Manufacturer ID %02x\n", __FUNCTION__, XENIUM_FLASH_MANUF_ID);
                 return XENIUM_FLASH_MANUF_ID;
+            // The PrometheOS driver reads the device ID at byte offset 1
+            // (manuf=lpcMemMap[0]; devid=lpcMemMap[1]); offset 2 is accepted
+            // too for the x16-style autoselect convention.
+            case 1:
             case 2:
                 DPRINTF("%s Sending Device ID %02x\n", __FUNCTION__, XENIUM_FLASH_DEV_ID);
                 return XENIUM_FLASH_DEV_ID;
@@ -251,18 +349,14 @@ static void flash_write(void *opaque, hwaddr offset, uint64_t value,
 
     DPRINTF("%s offset: %08x value: %02x size: %d, cycle: %d\n", __FUNCTION__, (uint32_t)offset, (uint8_t)value, size, s->flash_cycle);
 
-    // Reset
-    if(offset == 0x00 && value == 0xF0 && size == 1) {
-        DPRINTF("%s Flash Reset (Entering Normal flash state)\n", __FUNCTION__);
-
-        s->flash_state = XENIUM_MEMORY_STATE_NORMAL;
-        s->flash_cycle = 1;
-        return;
-    }
-
+    // A data-program cycle takes priority over command decoding: while in the
+    // WRITE state the next access programs a flash byte and must not be
+    // re-parsed as a command. In particular data byte 0xF0 written to offset 0
+    // is real flash data here, not a reset - checking reset first would silently
+    // drop that byte and hang the guest's program-verify poll.
     if (s->flash_state == XENIUM_MEMORY_STATE_WRITE)
     {
-        DPRINTF("%s Flash Write offset = %08x, value %02x\n", __FUNCTION__, offset, value);
+        DPRINTF("%s Flash Write offset = %08x, value %02x\n", __FUNCTION__, (uint32_t)offset, (uint8_t)value);
 
         //Handle mirroring
         offset %= XeniumBank[s->bank_control].size;
@@ -284,6 +378,17 @@ static void flash_write(void *opaque, hwaddr offset, uint64_t value,
             DPRINTF("%s Unsupported write len %d\n", __FUNCTION__, size);
             assert(0);
         }
+
+        xenium_flash_mark_dirty(s);
+
+        s->flash_state = XENIUM_MEMORY_STATE_NORMAL;
+        s->flash_cycle = 1;
+        return;
+    }
+
+    // Reset (exits CFI / Autoselect and aborts an in-progress command sequence)
+    if(offset == 0x00 && value == 0xF0 && size == 1) {
+        DPRINTF("%s Flash Reset (Entering Normal flash state)\n", __FUNCTION__);
 
         s->flash_state = XENIUM_MEMORY_STATE_NORMAL;
         s->flash_cycle = 1;
@@ -344,9 +449,21 @@ static void flash_write(void *opaque, hwaddr offset, uint64_t value,
             break;
         case 6:
             if(value == 0x30 && size == 1) {
-                DPRINTF("%s Entering Sector Erase State, Offset = %04llx\n", __FUNCTION__, offset);
-                
-                s->flash_state = XENIUM_MEMORY_STATE_SECTOR_ERASE;
+                //Handle mirroring + banking to resolve the absolute flash address
+                hwaddr sector = offset;
+                sector %= XeniumBank[s->bank_control].size;
+                sector |= XeniumBank[s->bank_control].offset;
+
+                DPRINTF("%s Sector Erase, bank-rel %04llx -> abs %08x\n", __FUNCTION__,
+                        (unsigned long long)offset, (uint32_t)sector);
+
+                xenium_erase_sector((uint32_t)sector);
+                xenium_flash_mark_dirty(s);
+
+                // Erase completes immediately; return to normal so the guest's
+                // toggle / read-back poll sees the erased (0xFF) sector and exits.
+                s->flash_state = XENIUM_MEMORY_STATE_NORMAL;
+                s->flash_cycle = 1;
             }
             break;
     }
@@ -396,6 +513,14 @@ static void xenium_realize(DeviceState *dev, Error **errp)
     s->led = 1;                                  // red
     s->flash_state = XENIUM_MEMORY_STATE_NORMAL; // Default flash state
     s->flash_cycle = 1;                          // Flash command cycle tracker
+
+    // Deferred flash persistence: a debounce timer writes the image back to the
+    // ROM file ~2s after the last write, and an exit notifier flushes any
+    // pending changes when xemu quits.
+    s->flash_dirty = false;
+    s->flush_timer = timer_new_ms(QEMU_CLOCK_REALTIME, xenium_flash_flush_cb, s);
+    s->exit_notifier.notify = xenium_flash_exit_notify;
+    qemu_add_exit_notifier(&s->exit_notifier);
 
     #define ROM_END 0xFFFFFFFF
     #define ROM_START 0xFF000000
