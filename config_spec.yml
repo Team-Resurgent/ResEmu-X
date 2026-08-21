@@ -359,12 +359,17 @@ sys:
     type: enum
     values: [scart, hdtv, vga, rfu, svideo, composite, none]
     default: hdtv
+  # Emulate the Xenium modchip, loaded with the modchip BIOS below.
+  xenium_enabled:
+    type: bool
+    default: false
   files:
     bootrom_path: string
     flashrom_path: string
     eeprom_path: string
     hdd_path: string
     dvd_path: string
+    modchip_bios_path: string
 
 perf:
   hard_fpu:

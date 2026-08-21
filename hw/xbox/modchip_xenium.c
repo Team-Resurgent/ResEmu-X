@@ -4,6 +4,8 @@
  * Copyright (c) 2021 Mike Davis
  * Copyright (c) 2021 Ryzee119
  *
+ * Updated by EqUiNoX to implement the flash and banking.
+ *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
  * License as published by the Free Software Foundation; either
@@ -23,7 +25,7 @@
 #include "qemu/datadir.h"
 #include "hw/qdev-properties.h"
 #include "migration/vmstate.h"
-#include "sysemu/sysemu.h"
+#include "system/system.h"
 #include "hw/hw.h"
 #include "hw/loader.h"
 #include "hw/char/serial.h"
@@ -416,9 +418,8 @@ static void xenium_realize(DeviceState *dev, Error **errp)
     isa_register_ioport(isa, &s->io, XENIUM_REGISTER_BASE);
 }
 
-static Property xenium_properties[] = {
+static const Property xenium_properties[] = {
     DEFINE_PROP_STRING("rom-path", XeniumState, rom_file),
-    DEFINE_PROP_END_OF_LIST(),
 };
 
 static const VMStateDescription vmstate_xenium = {
@@ -430,7 +431,7 @@ static const VMStateDescription vmstate_xenium = {
     }
 };
 
-static void xenium_class_init(ObjectClass *klass, void *data)
+static void xenium_class_init(ObjectClass *klass, const void *data)
 {
     DeviceClass *dc = DEVICE_CLASS(klass);
 
