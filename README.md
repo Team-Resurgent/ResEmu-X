@@ -1,6 +1,6 @@
 <div align="center">
 
-# Duke-X
+# ResEmu-X
 
 **A fork of [xemu](https://xemu.app), the original Xbox emulator, featuring
 unofficial enhancements by Team Resurgent.**
@@ -8,8 +8,8 @@ unofficial enhancements by Team Resurgent.**
 </div>
 
 <p align="center">
-  <a href="https://github.com/Team-Resurgent/Duke-X/blob/teamresurgent/LICENSE"><img src="https://img.shields.io/badge/License-GPLv2-blue.svg" alt="License: GPL v2"></a>
-  <a href="https://github.com/Team-Resurgent/Duke-X/actions/workflows/build.yml"><img src="https://github.com/Team-Resurgent/Duke-X/actions/workflows/build.yml/badge.svg" alt="Build"></a>
+  <a href="https://github.com/Team-Resurgent/ResEmu-X/blob/teamresurgent/LICENSE"><img src="https://img.shields.io/badge/License-GPLv2-blue.svg" alt="License: GPL v2"></a>
+  <a href="https://github.com/Team-Resurgent/ResEmu-X/actions/workflows/build.yml"><img src="https://github.com/Team-Resurgent/ResEmu-X/actions/workflows/build.yml/badge.svg" alt="Build"></a>
   <a href="https://discord.gg/VcdSfajQGK"><img src="https://img.shields.io/badge/chat-on%20discord-7289da.svg?logo=discord" alt="Discord"></a>
 </p>
 
@@ -19,10 +19,10 @@ unofficial enhancements by Team Resurgent.**
 </p>
 
 <p align="center">
-  <a href="https://github.com/Team-Resurgent/Duke-X/releases/latest"><img src="https://img.shields.io/badge/download-latest-brightgreen.svg?style=for-the-badge&logo=github" alt="Download"></a>
+  <a href="https://github.com/Team-Resurgent/ResEmu-X/releases/latest"><img src="https://img.shields.io/badge/download-latest-brightgreen.svg?style=for-the-badge&logo=github" alt="Download"></a>
 </p>
 
-> **Duke-X is independently maintained by Team Resurgent and is not affiliated
+> **ResEmu-X is independently maintained by Team Resurgent and is not affiliated
 > with or supported by the upstream xemu project.**
 
 This repository is a fork of xemu maintained by **Team Resurgent**. The default
@@ -32,7 +32,7 @@ apply — see the [upstream project](https://github.com/xemu-project/xemu) and
 [xemu.app](https://xemu.app) for general usage and configuration. However,
 because these enhancements are unofficial, please report any problems you hit
 with this fork to Team Resurgent — via the
-[Duke-X issue tracker](https://github.com/Team-Resurgent/Duke-X/issues) or
+[ResEmu-X issue tracker](https://github.com/Team-Resurgent/ResEmu-X/issues) or
 [Discord](https://discord.gg/VcdSfajQGK) — and **not** to the upstream xemu
 project.
 
