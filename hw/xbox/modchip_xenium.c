@@ -38,11 +38,31 @@
 #define XENIUM_REGISTER0 0
 #define XENIUM_REGISTER1 1
 
-#define DEBUG
-#ifdef DEBUG
+/* Debug verbosity as a bitmask, so the two channels are independent:
+ *   bit 0 (0x1) GENERAL - general modchip logging (DPRINTF): IO registers,
+ *               memory mapping, per-access chatter. This is the "everything
+ *               else" firehose.
+ *   bit 1 (0x2) FLASH   - detailed flash-transaction logging (XFLOG): command
+ *               decode, state transitions, program/erase, persistence. This is
+ *               the channel for debugging guest BIOS flashing.
+ * Combine as needed:  0x0 silent, 0x1 general only, 0x2 flash only, 0x3 both.
+ * FLASH is routed to stderr and flushed so it survives the windowed build - run
+ * xemu-modchip.exe from a console (or redirect 2> flash.log) to capture it. */
+#define XENIUM_DEBUG_LEVEL 0x0
+
+#if (XENIUM_DEBUG_LEVEL & 0x1)
 # define DPRINTF(format, ...) printf(format, ## __VA_ARGS__)
 #else
 # define DPRINTF(format, ...) do { } while (0)
+#endif
+
+#if (XENIUM_DEBUG_LEVEL & 0x2)
+# define XFLOG(fmt, ...) do { \
+        fprintf(stderr, "[xenium-flash] " fmt "\n", ## __VA_ARGS__); \
+        fflush(stderr); \
+    } while (0)
+#else
+# define XFLOG(fmt, ...) do { } while (0)
 #endif
 
 #define XENIUM_FLASH_MANUF_ID (0x01)
@@ -115,6 +135,18 @@ typedef enum {
     XENIUM_MEMORY_STATE_WRITE,
 } XeniumMemoryState;
 
+static const char *xenium_state_name(XeniumMemoryState st)
+{
+    switch (st) {
+        case XENIUM_MEMORY_STATE_NORMAL:       return "NORMAL";
+        case XENIUM_MEMORY_STATE_CFI:          return "CFI";
+        case XENIUM_MEMORY_STATE_AUTOSELECT:   return "AUTOSELECT";
+        case XENIUM_MEMORY_STATE_SECTOR_ERASE: return "SECTOR_ERASE";
+        case XENIUM_MEMORY_STATE_WRITE:        return "WRITE";
+    }
+    return "?";
+}
+
 typedef struct XeniumState {
     ISADevice dev;
     SysBusDevice dev_sysbus;
@@ -159,19 +191,27 @@ static void xenium_io_write(void *opaque, hwaddr addr, uint64_t val,
             assert((val >> 3) == 0);    // un-known/used
             s->led = val;
             DPRINTF("%s: Set LED color(s) to %d\n", __func__, s->led);
+            XFLOG("IO write reg0 (LED) = 0x%02x", (uint8_t)val);
         break;
-        case XENIUM_REGISTER1:
+        case XENIUM_REGISTER1: {
             assert((val & (1 << 7)) == 0);    // un-known/used
             s->sck = val & (1 << 6);
             s->cs = val & (1 << 5);
             s->mosi = val & (1 << 4);
             s->bank_control = val & 0xF;
+            if (s->bank_control >= ARRAY_SIZE(XeniumBank)) {
+                XFLOG("IO BANK 0x%x OUT OF RANGE (max %u) - clamping to 0",
+                      s->bank_control, (unsigned)ARRAY_SIZE(XeniumBank) - 1);
+                s->bank_control = 0;
+            }
+            unsigned int flash_off  = XeniumBank[s->bank_control].offset;
             unsigned int flash_size = XeniumBank[s->bank_control].size;
             DPRINTF("%s: Set Bank to %d, Offset: %08x, Size: %d bytes\n", __func__, s->bank_control,
-                                                                          XeniumBank[s->bank_control].offset,
-                                                                          flash_size);
-
-        break;
+                                                                          flash_off, flash_size);
+            XFLOG("IO write reg1=0x%02x -> BANK=%u off=0x%06x size=%uK  sck=%d cs=%d mosi=%d",
+                  (uint8_t)val, s->bank_control, flash_off, flash_size / 1024,
+                  s->sck, s->cs, s->mosi);
+        } break;
         default: assert(false);
     }
 }
@@ -197,6 +237,9 @@ static uint64_t xenium_io_read(void *opaque, hwaddr addr, unsigned int size)
     DPRINTF("%s: Read 0x%X from IO register 0x%llX\n",
         __func__, val, XENIUM_REGISTER_BASE + addr);
 
+    XFLOG("IO read reg%u = 0x%02x  (recovery=%d miso1=%d miso4=%d bank=%u)",
+          (unsigned)addr, val, s->recovery, s->miso_1, s->miso_4, s->bank_control);
+
     return val;
 }
 
@@ -211,7 +254,7 @@ static const MemoryRegionOps xenium_io_ops = {
 
 /* Erase the flash sector that contains absolute flash address `addr`, setting
  * every byte to 0xFF. The sector geometry mirrors the real Xenium flash (and
- * the PrometheOS driver's isEraseMemOffset()): uniform 64K sectors across the
+ * the flash device's sector map): uniform 64K sectors across the
  * main region, with smaller 32K/8K/16K boot sectors at the very top of the
  * 2MB device. Boundaries are all power-of-two aligned so a mask finds the
  * sector base. */
@@ -239,6 +282,8 @@ static void xenium_erase_sector(uint32_t addr)
 
     DPRINTF("%s Erasing sector base=%08x size=%u (from addr %08x)\n",
         __func__, base, sector_size, addr);
+    XFLOG("ERASE  sector base=0x%06x size=%uK  (target addr 0x%06x)",
+          base, sector_size / 1024, addr);
     memset(&xenium_raw[base], 0xFF, sector_size);
 }
 
@@ -268,6 +313,7 @@ static void xenium_flash_flush(XeniumState *s)
 
     s->flash_dirty = false;
     DPRINTF("%s Flash image persisted to '%s'\n", __func__, s->rom_file);
+    XFLOG("PERSIST wrote %d bytes back to '%s'", XENIUM_FLASH_SIZE, s->rom_file);
 }
 
 static void xenium_flash_flush_cb(void *opaque)
@@ -318,25 +364,32 @@ static uint64_t flash_read(void *opaque, hwaddr offset, unsigned size)
     }
 
     DPRINTF("%s offset: %08x size: %d\n", __FUNCTION__, (uint32_t)offset, size);
+    XFLOG("READ   state=%s off=0x%06x size=%u", xenium_state_name(s->flash_state),
+          (uint32_t)offset, size);
 
     if(s->flash_state == XENIUM_MEMORY_STATE_CFI) {
-        return XeniumFlashCFI[(size == 1 ? offset : offset << 1) % sizeof(XeniumFlashCFI)];
+        uint8_t cfi = XeniumFlashCFI[(size == 1 ? offset : offset << 1) % sizeof(XeniumFlashCFI)];
+        XFLOG("READ   CFI[0x%02x] -> 0x%02x", (uint32_t)offset, cfi);
+        return cfi;
     }
 
     if(s->flash_state == XENIUM_MEMORY_STATE_AUTOSELECT) {
         switch (offset) {
             case 0:
                 DPRINTF("%s Sending Manufacturer ID %02x\n", __FUNCTION__, XENIUM_FLASH_MANUF_ID);
+                XFLOG("READ   AUTOSELECT manufacturer id -> 0x%02x", XENIUM_FLASH_MANUF_ID);
                 return XENIUM_FLASH_MANUF_ID;
-            // The PrometheOS driver reads the device ID at byte offset 1
+            // The flash driver reads the device ID at byte offset 1
             // (manuf=lpcMemMap[0]; devid=lpcMemMap[1]); offset 2 is accepted
             // too for the x16-style autoselect convention.
             case 1:
             case 2:
                 DPRINTF("%s Sending Device ID %02x\n", __FUNCTION__, XENIUM_FLASH_DEV_ID);
+                XFLOG("READ   AUTOSELECT device id (off %u) -> 0x%02x", (uint32_t)offset, XENIUM_FLASH_DEV_ID);
                 return XENIUM_FLASH_DEV_ID;
         }
         DPRINTF("%s Invalid Chip ID offset: %08x\n", __FUNCTION__, (uint32_t)offset);
+        XFLOG("READ   AUTOSELECT unknown offset 0x%06x -> 0x00", (uint32_t)offset);
     }
 
     return 0;
@@ -348,6 +401,9 @@ static void flash_write(void *opaque, hwaddr offset, uint64_t value,
     XeniumState *s = opaque;
 
     DPRINTF("%s offset: %08x value: %02x size: %d, cycle: %d\n", __FUNCTION__, (uint32_t)offset, (uint8_t)value, size, s->flash_cycle);
+    XFLOG("WRITE  off=0x%06x val=0x%02x size=%u  [state=%s cycle=%u bank=%u]",
+          (uint32_t)offset, (uint8_t)value, size,
+          xenium_state_name(s->flash_state), s->flash_cycle, s->bank_control);
 
     // A data-program cycle takes priority over command decoding: while in the
     // WRITE state the next access programs a flash byte and must not be
@@ -364,15 +420,20 @@ static void flash_write(void *opaque, hwaddr offset, uint64_t value,
         offset |= XeniumBank[s->bank_control].offset;
         if (size == 1) {
             uint8_t *flash_mem = (uint8_t *)xenium_raw;
+            uint8_t old = flash_mem[offset];
             flash_mem[offset] = (uint8_t)value;
+            XFLOG("PROGRAM abs=0x%06x  0x%02x -> 0x%02x%s", (uint32_t)offset, old, (uint8_t)value,
+                  (~old & (uint8_t)value) ? "   (sets 1 bits - real HW needs prior erase)" : "");
         }
         else if (size == 2) {
             uint16_t *flash_mem = (uint16_t *)xenium_raw;
             flash_mem[offset/2] = (uint16_t)value;
+            XFLOG("PROGRAM abs=0x%06x  16-bit 0x%04x", (uint32_t)offset, (uint16_t)value);
         }
         else if (size == 4) {
             uint32_t *flash_mem = (uint32_t *)xenium_raw;
             flash_mem[offset/4] = (uint32_t)value;
+            XFLOG("PROGRAM abs=0x%06x  32-bit 0x%08x", (uint32_t)offset, (uint32_t)value);
         }
         else {
             DPRINTF("%s Unsupported write len %d\n", __FUNCTION__, size);
@@ -389,62 +450,95 @@ static void flash_write(void *opaque, hwaddr offset, uint64_t value,
     // Reset (exits CFI / Autoselect and aborts an in-progress command sequence)
     if(offset == 0x00 && value == 0xF0 && size == 1) {
         DPRINTF("%s Flash Reset (Entering Normal flash state)\n", __FUNCTION__);
+        XFLOG("CMD    reset (F0) -> NORMAL");
 
         s->flash_state = XENIUM_MEMORY_STATE_NORMAL;
         s->flash_cycle = 1;
         return;
     }
 
+    // Command / unlock addresses are decoded on the low 12 bits only, so both
+    // the 16-bit (0xAAAA / 0x5555) and short 12-bit (0xAAA / 0x555) unlock
+    // address conventions are accepted (0xAAAA & 0xFFF == 0xAAA, etc.).
+    hwaddr cmd = offset & 0xFFF;
+
     switch (s->flash_cycle)
     {
         case 1:
             // Enter CFI Mode
-            if(offset == 0xAA && value == 0x98 && size == 1) {
+            if(cmd == 0xAA && value == 0x98 && size == 1) {
                 DPRINTF("%s Entering CFI Mode flash state\n", __FUNCTION__);
+                XFLOG("CMD    CFI query (98) -> CFI state");
 
                 s->flash_state = XENIUM_MEMORY_STATE_CFI;
             }
-            else if(offset == 0xAAAA && value == 0xAA && size == 1) {
+            else if(cmd == 0xAAA && value == 0xAA && size == 1) {
+                XFLOG("CMD    unlock 1/2 ok (AA@AAAA) -> cycle 2");
                 s->flash_cycle++;
             }
             else {
                 DPRINTF("%s Unimplemented Flash command\n", __FUNCTION__);
+                XFLOG("CMD    UNEXPECTED at cycle 1: val=0x%02x off=0x%06x size=%u"
+                      " (want AA@0xAAA/0xAAAA or 98@0xAA)", (uint8_t)value, (uint32_t)offset, size);
             }
             break;
         case 2:
-            if(offset == 0x5555 && value == 0x55 && size == 1) {
+            if(cmd == 0x555 && value == 0x55 && size == 1) {
+                XFLOG("CMD    unlock 2/2 ok (55@5555) -> cycle 3");
                 s->flash_cycle++;
             }
             else {
                 DPRINTF("%s Unimplemented Flash command\n", __FUNCTION__);
+                XFLOG("CMD    UNEXPECTED at cycle 2: val=0x%02x off=0x%06x size=%u"
+                      " (want 55@0x555/0x5555) - resetting sequence", (uint8_t)value, (uint32_t)offset, size);
+                s->flash_cycle = 1;
             }
             break;
         case 3:
-            if(offset == 0xAAAA && value == 0x80 && size == 1) {
+            if(cmd == 0xAAA && value == 0x80 && size == 1) {
+                XFLOG("CMD    erase setup (80) -> cycle 4");
                 s->flash_cycle++;
             }
-            else if(offset == 0xAAAA && value == 0x90 && size == 1) {
+            else if(cmd == 0xAAA && value == 0x90 && size == 1) {
                 DPRINTF("%s Entering Autoselect Mode flash state\n", __FUNCTION__);
+                XFLOG("CMD    autoselect (90) -> AUTOSELECT state");
 
                 s->flash_state = XENIUM_MEMORY_STATE_AUTOSELECT;
             }
-            else if(offset == 0xAAAA && value == 0xA0 && size == 1) {
+            else if(cmd == 0xAAA && value == 0xA0 && size == 1) {
                 DPRINTF("%s Entering flash write state\n", __FUNCTION__);
+                XFLOG("CMD    program (A0) -> WRITE state (next access is the data byte)");
 
                 s->flash_state = XENIUM_MEMORY_STATE_WRITE;
             }
             else {
                 DPRINTF("%s Unimplemented Flash command\n", __FUNCTION__);
+                XFLOG("CMD    UNEXPECTED at cycle 3: val=0x%02x off=0x%06x size=%u"
+                      " (want 80/90/A0@0xAAA/0xAAAA) - resetting sequence",
+                      (uint8_t)value, (uint32_t)offset, size);
+                s->flash_cycle = 1;
             }
             break;
         case 4:
-            if(offset == 0xAAAA && value == 0xAA && size == 1) {
+            if(cmd == 0xAAA && value == 0xAA && size == 1) {
+                XFLOG("CMD    erase unlock 1/2 ok (AA@AAAA) -> cycle 5");
                 s->flash_cycle++;
+            }
+            else {
+                XFLOG("CMD    UNEXPECTED at cycle 4: val=0x%02x off=0x%06x size=%u"
+                      " (want AA@0xAAA/0xAAAA) - resetting sequence", (uint8_t)value, (uint32_t)offset, size);
+                s->flash_cycle = 1;
             }
             break;
         case 5:
-            if(offset == 0x5555 && value == 0x55 && size == 1) {
+            if(cmd == 0x555 && value == 0x55 && size == 1) {
+                XFLOG("CMD    erase unlock 2/2 ok (55@5555) -> cycle 6 (await 0x30 confirm)");
                 s->flash_cycle++;
+            }
+            else {
+                XFLOG("CMD    UNEXPECTED at cycle 5: val=0x%02x off=0x%06x size=%u"
+                      " (want 55@0x555/0x5555) - resetting sequence", (uint8_t)value, (uint32_t)offset, size);
+                s->flash_cycle = 1;
             }
             break;
         case 6:
@@ -456,6 +550,8 @@ static void flash_write(void *opaque, hwaddr offset, uint64_t value,
 
                 DPRINTF("%s Sector Erase, bank-rel %04llx -> abs %08x\n", __FUNCTION__,
                         (unsigned long long)offset, (uint32_t)sector);
+                XFLOG("CMD    sector-erase confirm (30) bank-rel 0x%06x -> abs 0x%06x",
+                      (uint32_t)offset, (uint32_t)sector);
 
                 xenium_erase_sector((uint32_t)sector);
                 xenium_flash_mark_dirty(s);
@@ -463,6 +559,11 @@ static void flash_write(void *opaque, hwaddr offset, uint64_t value,
                 // Erase completes immediately; return to normal so the guest's
                 // toggle / read-back poll sees the erased (0xFF) sector and exits.
                 s->flash_state = XENIUM_MEMORY_STATE_NORMAL;
+                s->flash_cycle = 1;
+            }
+            else {
+                XFLOG("CMD    UNEXPECTED at cycle 6: val=0x%02x off=0x%06x size=%u"
+                      " (want 30 confirm) - resetting sequence", (uint8_t)value, (uint32_t)offset, size);
                 s->flash_cycle = 1;
             }
             break;
