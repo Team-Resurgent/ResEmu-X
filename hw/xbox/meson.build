@@ -16,6 +16,7 @@ specific_ss.add(files(
 	'xid.c',
 	'xblc.c',
 	'xid-gamepad.c',
+    'modchip_xenium.c',
 	))
 subdir('nv2a')
 subdir('mcpx')
