@@ -1749,6 +1749,18 @@ void MainMenuSystemView::Draw()
                    xemu_settings_set_string(&g_config.sys.files.eeprom_path, path);
                    m_dirty = true;
                });
+
+    SectionTitle("Modchip");
+    if (Toggle("Enable Xenium", &g_config.sys.xenium_enabled,
+               "Emulate the Xenium modchip, loaded with the Modchip BIOS below")) {
+        m_dirty = true;
+    }
+    FilePicker("Modchip BIOS", g_config.sys.files.modchip_bios_path,
+               rom_file_filters, 3, false, [this](const char *path) {
+                   xemu_settings_set_string(
+                       &g_config.sys.files.modchip_bios_path, path);
+                   m_dirty = true;
+               });
 }
 
 MainMenuAboutView::MainMenuAboutView() : m_config_info_text{ NULL }

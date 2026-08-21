@@ -63,6 +63,7 @@
 /* FIXME: Clean this up and propagate errors to UI */
 static void xbox_flash_init(MachineState *ms, MemoryRegion *rom_memory)
 {
+    #if 0
     const uint32_t rom_start = 0xFF000000;
     const char *bios_name;
 
@@ -171,6 +172,7 @@ static void xbox_flash_init(MachineState *ms, MemoryRegion *rom_memory)
     memory_region_add_subregion_overlap(rom_memory, -bios_size, mcpx, 1);
 
     g_free(bios_data); /* duplicated by `rom_add_blob_fixed` */
+    #endif
 }
 
 static void xbox_memory_init(PCMachineState *pcms,
@@ -207,6 +209,7 @@ static void xbox_init(MachineState *machine)
     xbox_init_common(machine, NULL, NULL);
 }
 
+MemoryRegion *rom_memory__;
 void xbox_init_common(MachineState *machine,
                       PCIBus **pci_bus_out,
                       ISABus **isa_bus_out)
@@ -249,6 +252,7 @@ void xbox_init_common(MachineState *machine,
     pci_memory = g_new(MemoryRegion, 1);
     memory_region_init(pci_memory, NULL, "pci", UINT64_MAX);
     rom_memory = pci_memory;
+    rom_memory__ = rom_memory;
 
     // pc_guest_info_init(pcms);
 

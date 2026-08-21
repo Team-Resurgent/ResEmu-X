@@ -3053,6 +3053,25 @@ void qemu_init(int argc, char **argv)
         fake_argv[fake_argc++] = strdup(flashrom_path);
     }
 
+    // Xenium modchip: when enabled, attach the modchip-xenium device loaded with
+    // the configured modchip BIOS (no need to pass -device on the command line).
+    if (g_config.sys.xenium_enabled) {
+        const char *modchip_bios = g_config.sys.files.modchip_bios_path;
+        if (strlen(modchip_bios) == 0 || xemu_check_file(modchip_bios)) {
+            char *msg = g_strdup_printf(
+                "Xenium is enabled but its Modchip BIOS ('%s') could not be "
+                "opened. Please check machine settings.", modchip_bios);
+            xemu_queue_error_message(msg);
+            g_free(msg);
+        } else {
+            char *escaped_modchip = strdup_double_commas(modchip_bios);
+            fake_argv[fake_argc++] = strdup("-device");
+            fake_argv[fake_argc++] =
+                g_strdup_printf("modchip-xenium,rom-path=%s", escaped_modchip);
+            free(escaped_modchip);
+        }
+    }
+
     int mem = ((int)g_config.sys.mem_limit + 1) * 64;
     fake_argv[fake_argc++] = strdup("-m");
     fake_argv[fake_argc++] = g_strdup_printf("%d", mem);
