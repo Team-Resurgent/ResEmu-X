@@ -22,7 +22,7 @@
 #include "nv2a_int.h"
 
 /* Defined in hw/xbox/modchip_xenium.c; only true when the Xenium is attached. */
-extern bool xenium_present;
+extern bool xenium_enabled;
 
 uint64_t pcrtc_read(void *opaque, hwaddr addr, unsigned int size)
 {
@@ -68,7 +68,7 @@ void pcrtc_write(void *opaque, hwaddr addr, uint64_t val, unsigned int size)
     case NV_PCRTC_START:
         /* The Xenium banks flash via the upper bits of PCRTC_START; only skip
          * the normal address mask when the modchip is attached. */
-        if (!xenium_present) {
+        if (!xenium_enabled) {
             val &= 0x07FFFFFF;
             assert(val < memory_region_size(d->vram));
         }

@@ -3064,6 +3064,10 @@ void qemu_init(int argc, char **argv)
             xemu_queue_error_message(msg);
             g_free(msg);
         } else {
+            /* Tell the board setup (xbox.c) and NV2A hooks the modchip is
+             * active, so the normal BIOS flash init is skipped. */
+            extern bool xenium_enabled;
+            xenium_enabled = true;
             char *escaped_modchip = strdup_double_commas(modchip_bios);
             fake_argv[fake_argc++] = strdup("-device");
             fake_argv[fake_argc++] =

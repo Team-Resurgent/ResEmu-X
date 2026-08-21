@@ -22,7 +22,7 @@
 #include "nv2a_int.h"
 
 /* Defined in hw/xbox/modchip_xenium.c; only true when the Xenium is attached. */
-extern bool xenium_present;
+extern bool xenium_enabled;
 
 /* PRMCIO - aliases VGA CRTC and attribute controller registers */
 uint64_t prmcio_read(void *opaque, hwaddr addr, unsigned int size)
@@ -32,7 +32,7 @@ uint64_t prmcio_read(void *opaque, hwaddr addr, unsigned int size)
 
     nv2a_reg_log_read(NV_PRMCIO, addr, size, r);
 
-    if (xenium_present && addr == 0x3D8) {
+    if (xenium_enabled && addr == 0x3D8) {
         if (d->vga.ar_flip_flop ^= 1) {
             return 8 << 16;
         }
