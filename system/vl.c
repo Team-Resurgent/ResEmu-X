@@ -2948,6 +2948,41 @@ static const char *get_eeprom_path(void)
     return path;
 }
 
+/* Report a missing or unreadable modchip image. Returns true on failure. */
+static bool check_modchip_file(const char *modchip_name, const char *what,
+                               const char *path)
+{
+    if (strlen(path) > 0 && !xemu_check_file(path)) {
+        return false;
+    }
+
+    char *msg = g_strdup_printf("%s is enabled but its %s ('%s') could not be "
+                                "opened. Please check machine settings.",
+                                modchip_name, what, path);
+    xemu_queue_error_message(msg);
+    g_free(msg);
+
+    return true;
+}
+
+/* Report a modchip image that is not the size the device expects. Returns true
+ * on failure. */
+static bool check_modchip_size(const char *what, const char *path, int expected)
+{
+    int size = get_image_size(path, NULL);
+    if (size == expected) {
+        return false;
+    }
+
+    char *msg = g_strdup_printf("Invalid %s file '%s' size of %d; should be %d "
+                                "bytes.\n\nPlease check machine settings.",
+                                what, path, size, expected);
+    xemu_queue_error_message(msg);
+    g_free(msg);
+
+    return true;
+}
+
 void qemu_init(int argc, char **argv)
 {
     QemuOpts *opts;
@@ -3053,21 +3088,64 @@ void qemu_init(int argc, char **argv)
         fake_argv[fake_argc++] = strdup(flashrom_path);
     }
 
-    // Xenium modchip: when enabled, attach the modchip-xenium device loaded with
-    // the configured modchip BIOS (no need to pass -device on the command line).
-    if (g_config.sys.xenium_enabled) {
+    // Modchip: when one is selected, attach its devices loaded with the
+    // configured modchip images (no need to pass -device on the command line).
+    int modchip = (int)g_config.sys.modchip;
+    if (modchip != CONFIG_SYS_MODCHIP_NONE) {
+        const char *modchip_name =
+            (modchip == CONFIG_SYS_MODCHIP_XECUTER) ? "Xecuter" : "Xenium";
         const char *modchip_bios = g_config.sys.files.modchip_bios_path;
-        if (strlen(modchip_bios) == 0 || xemu_check_file(modchip_bios)) {
-            char *msg = g_strdup_printf(
-                "Xenium is enabled but its Modchip BIOS ('%s') could not be "
-                "opened. Please check machine settings.", modchip_bios);
-            xemu_queue_error_message(msg);
-            g_free(msg);
-        } else {
+        bool modchip_ok =
+            !check_modchip_file(modchip_name, "Modchip BIOS", modchip_bios);
+
+        if (modchip == CONFIG_SYS_MODCHIP_XECUTER) {
+            // The Xecuter carries its own AT24C08D EEPROM on the SMBus, backed
+            // by the Modchip EEPROM file, and a secondary recovery BIOS.
+            const char *eeprom = g_config.sys.files.modchip_eeprom_path;
+            const char *recovery = g_config.sys.files.modchip_recovery_path;
+
+            if (check_modchip_file(modchip_name, "Modchip EEPROM", eeprom) ||
+                check_modchip_file(modchip_name, "Modchip Recovery BIOS",
+                                   recovery)) {
+                modchip_ok = false;
+            } else if (check_modchip_size("Modchip BIOS", modchip_bios,
+                                          2 * 1024 * 1024) ||
+                       check_modchip_size("Modchip Recovery BIOS", recovery,
+                                          256 * 1024) ||
+                       check_modchip_size("Modchip EEPROM", eeprom, 1024)) {
+                modchip_ok = false;
+            }
+
+            if (modchip_ok) {
+                extern bool modchip_enabled;
+                modchip_enabled = true;
+
+                char *escaped_eeprom = strdup_double_commas(eeprom);
+                fake_argv[fake_argc++] = strdup("-device");
+                fake_argv[fake_argc++] =
+                    g_strdup_printf("at24c08d,file=%s", escaped_eeprom);
+                free(escaped_eeprom);
+
+                char *escaped_bios = strdup_double_commas(modchip_bios);
+                char *escaped_recovery = strdup_double_commas(recovery);
+                fake_argv[fake_argc++] = strdup("-device");
+                fake_argv[fake_argc++] = g_strdup_printf(
+                    "modchip-xecuter,rom-path=%s,recovery-path=%s,"
+                    "bank-switches=%d",
+                    escaped_bios, escaped_recovery,
+                    (int)g_config.sys.modchip_bank);
+                free(escaped_bios);
+                free(escaped_recovery);
+            }
+        }
+
+        if (modchip_ok && modchip == CONFIG_SYS_MODCHIP_XENIUM) {
             /* Tell the board setup (xbox.c) and NV2A hooks the modchip is
              * active, so the normal BIOS flash init is skipped. */
             extern bool xenium_enabled;
+            extern bool modchip_enabled;
             xenium_enabled = true;
+            modchip_enabled = true;
             char *escaped_modchip = strdup_double_commas(modchip_bios);
             fake_argv[fake_argc++] = strdup("-device");
             fake_argv[fake_argc++] =

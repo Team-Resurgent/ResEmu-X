@@ -1751,16 +1751,58 @@ void MainMenuSystemView::Draw()
                });
 
     SectionTitle("Modchip");
-    if (Toggle("Enable Xenium", &g_config.sys.xenium_enabled,
-               "Emulate the Xenium modchip, loaded with the Modchip BIOS below")) {
+    if (ChevronCombo("Modchip", &g_config.sys.modchip,
+                     "None (Default)\0"
+                     "Xenium\0"
+                     "Xecuter\0",
+                     "Select a modchip to emulate")) {
         m_dirty = true;
     }
-    FilePicker("Modchip BIOS", g_config.sys.files.modchip_bios_path,
-               rom_file_filters, 3, false, [this](const char *path) {
-                   xemu_settings_set_string(
-                       &g_config.sys.files.modchip_bios_path, path);
-                   m_dirty = true;
-               });
+
+    if ((int)g_config.sys.modchip != CONFIG_SYS_MODCHIP_NONE) {
+        FilePicker("Modchip BIOS", g_config.sys.files.modchip_bios_path,
+                   rom_file_filters, 3, false, [this](const char *path) {
+                       xemu_settings_set_string(
+                           &g_config.sys.files.modchip_bios_path, path);
+                       m_dirty = true;
+                   });
+    }
+
+    if ((int)g_config.sys.modchip == CONFIG_SYS_MODCHIP_XECUTER) {
+        if (ChevronCombo("Bank Switches", &g_config.sys.modchip_bank,
+                         "0000 - Bank 1 - 256K\0"
+                         "0001 - Bank 2 - 256K\0"
+                         "0010 - Bank 3 - 256K\0"
+                         "0011 - Bank 4 - 256K\0"
+                         "0100 - Bank 5 - 256K\0"
+                         "0101 - Bank 6 - 256K\0"
+                         "0110 - Bank 7 - 256K\0"
+                         "0111 - Bank 8 - 256K\0"
+                         "1000 - Bank 1-2 - 512K\0"
+                         "1001 - Bank 3-4 - 512K\0"
+                         "1010 - Bank 5-6 - 512K\0"
+                         "1011 - Bank 7-8 - 512K\0"
+                         "1100 - Bank 1-4 - 1M\0"
+                         "1101 - Bank 5-8 - 1M\0"
+                         "1110 - Bank 1-8 - 2M\0"
+                         "1111 - Bank 1-8 - 2M\0",
+                         "Physical bank switch position")) {
+            m_dirty = true;
+        }
+        FilePicker("Modchip EEPROM", g_config.sys.files.modchip_eeprom_path,
+                   rom_file_filters, 3, false, [this](const char *path) {
+                       xemu_settings_set_string(
+                           &g_config.sys.files.modchip_eeprom_path, path);
+                       m_dirty = true;
+                   });
+        FilePicker("Modchip Recovery BIOS",
+                   g_config.sys.files.modchip_recovery_path, rom_file_filters,
+                   3, false, [this](const char *path) {
+                       xemu_settings_set_string(
+                           &g_config.sys.files.modchip_recovery_path, path);
+                       m_dirty = true;
+                   });
+    }
 }
 
 MainMenuAboutView::MainMenuAboutView() : m_config_info_text{ NULL }
