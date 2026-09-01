@@ -40,8 +40,9 @@
 #include "system/arch_init.h"
 #include "system/memory.h"
 
-/* Defined in hw/xbox/modchip_xenium.c; set when the Xenium modchip is active. */
-extern bool xenium_enabled;
+/* Set by the machine setup (vl.c) when a modchip is active and provides its own
+ * flash mapping. */
+bool modchip_enabled;
 #include "system/address-spaces.h"
 #include "cpu.h"
 
@@ -66,10 +67,10 @@ extern bool xenium_enabled;
 /* FIXME: Clean this up and propagate errors to UI */
 static void xbox_flash_init(MachineState *ms, MemoryRegion *rom_memory)
 {
-    /* When the Xenium modchip is enabled it provides its own flash mapping, so
-     * skip the normal BIOS/MCPX setup only in that case. Otherwise do it here so
-     * the machine boots from the selected Flash ROM as usual. */
-    if (!xenium_enabled) {
+    /* When a modchip is enabled it provides its own flash mapping, so skip the
+     * normal BIOS/MCPX setup only in that case. Otherwise do it here so the
+     * machine boots from the selected Flash ROM as usual. */
+    if (!modchip_enabled) {
     const uint32_t rom_start = 0xFF000000;
     const char *bios_name;
 

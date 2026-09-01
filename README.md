@@ -41,9 +41,10 @@ project.
 Features on the `teamresurgent` branch that are not (yet) in upstream xemu:
 
 - **Xenium modchip emulation** — emulate the Xenium modchip, including its flash
-  and banking. Enable it and point it at a modchip BIOS in *Settings → System →
+  and banking. Select it and point it at a modchip BIOS in *Settings → System →
   Modchip* (no command-line `-device` needed); it overlays the configured MCPX
-  Boot ROM. With Xenium disabled, xemu boots normally from the selected Flash ROM.
+  Boot ROM. With the modchip set to *None*, xemu boots normally from the selected
+  Flash ROM.
 
 - **CCI compressed disc images** — mount `.cci` Xbox disc containers directly,
   including multi-part (`name.1.cci`, `name.2.cci`, …) images. The container

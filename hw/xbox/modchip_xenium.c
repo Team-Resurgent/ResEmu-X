@@ -84,6 +84,8 @@ extern MemoryRegion *rom_memory__; //FIXME
  * when the modchip is disabled. */
 bool xenium_enabled = false;
 
+extern bool modchip_enabled;
+
 uint8_t xenium_raw[XENIUM_FLASH_SIZE];
 uint8_t mcpx_raw[MCPX_SIZE];
 
@@ -135,7 +137,7 @@ typedef enum {
     XENIUM_MEMORY_STATE_WRITE,
 } XeniumMemoryState;
 
-static const char *xenium_state_name(XeniumMemoryState st)
+G_GNUC_UNUSED static const char *xenium_state_name(XeniumMemoryState st)
 {
     switch (st) {
         case XENIUM_MEMORY_STATE_NORMAL:       return "NORMAL";
@@ -204,8 +206,8 @@ static void xenium_io_write(void *opaque, hwaddr addr, uint64_t val,
                       s->bank_control, (unsigned)ARRAY_SIZE(XeniumBank) - 1);
                 s->bank_control = 0;
             }
-            unsigned int flash_off  = XeniumBank[s->bank_control].offset;
-            unsigned int flash_size = XeniumBank[s->bank_control].size;
+            G_GNUC_UNUSED unsigned int flash_off  = XeniumBank[s->bank_control].offset;
+            G_GNUC_UNUSED unsigned int flash_size = XeniumBank[s->bank_control].size;
             DPRINTF("%s: Set Bank to %d, Offset: %08x, Size: %d bytes\n", __func__, s->bank_control,
                                                                           flash_off, flash_size);
             XFLOG("IO write reg1=0x%02x -> BANK=%u off=0x%06x size=%uK  sck=%d cs=%d mosi=%d",
@@ -420,7 +422,7 @@ static void flash_write(void *opaque, hwaddr offset, uint64_t value,
         offset |= XeniumBank[s->bank_control].offset;
         if (size == 1) {
             uint8_t *flash_mem = (uint8_t *)xenium_raw;
-            uint8_t old = flash_mem[offset];
+            G_GNUC_UNUSED uint8_t old = flash_mem[offset];
             flash_mem[offset] = (uint8_t)value;
             XFLOG("PROGRAM abs=0x%06x  0x%02x -> 0x%02x%s", (uint32_t)offset, old, (uint8_t)value,
                   (~old & (uint8_t)value) ? "   (sets 1 bits - real HW needs prior erase)" : "");
@@ -585,6 +587,7 @@ static void xenium_realize(DeviceState *dev, Error **errp)
     Error *err = NULL;
 
     xenium_enabled = true;
+    modchip_enabled = true;
 
     //Read Xenium Flash Dump (2MB file)
     int fd = qemu_open(s->rom_file, O_RDONLY | O_BINARY, NULL);
@@ -595,6 +598,7 @@ static void xenium_realize(DeviceState *dev, Error **errp)
     //Read MCPX Dump (512 bytes)
     const char *bootrom_file =
         object_property_get_str(qdev_get_machine(), "bootrom", NULL);
+    bool have_bootrom = false;
 
     if ((bootrom_file != NULL) && *bootrom_file) {
         char *filename = qemu_find_file(QEMU_FILE_TYPE_BIOS, bootrom_file);
@@ -603,7 +607,7 @@ static void xenium_realize(DeviceState *dev, Error **errp)
         /* Read in MCPX ROM over last 512 bytes of BIOS data */
         int fd = qemu_open(filename, O_RDONLY | O_BINARY, NULL);
         assert(fd >= 0);
-        read(fd, mcpx_raw, MCPX_SIZE);
+        have_bootrom = read(fd, mcpx_raw, MCPX_SIZE) == MCPX_SIZE;
         close(fd);
         g_free(filename);
     }
@@ -623,9 +627,8 @@ static void xenium_realize(DeviceState *dev, Error **errp)
     s->exit_notifier.notify = xenium_flash_exit_notify;
     qemu_add_exit_notifier(&s->exit_notifier);
 
-    #define ROM_END 0xFFFFFFFF
     #define ROM_START 0xFF000000
-    #define ROM_AREA (ROM_END - ROM_START - MCPX_SIZE)
+    #define ROM_AREA  0x01000000
 
     memory_region_init_rom_device(&s->flash_mem, OBJECT(s), &xenium_flash_ops, s, "xenium.bios", ROM_AREA, &err);
     memory_region_rom_device_set_romd(&s->flash_mem, false);
@@ -636,16 +639,36 @@ static void xenium_realize(DeviceState *dev, Error **errp)
     memory_region_init_alias(mr_bios, NULL, "xenium.bios.alias", &s->flash_mem, 0, ROM_AREA);
     memory_region_add_subregion(rom_memory__, ROM_START, mr_bios);
 
-    //Add MCPX memory and alias it to 0xFFFFFE00 in Xbox memory
-    //FIXME, most of page is not mirrored properly and overlaying the ideal 512bytes is really slow
+    /* MCPX boot ROM, overlaid on the flash at the top of the ROM window. The
+     * real part only drives the last 512 bytes, but the overlay has to be page
+     * aligned to stay off the slow path, so the rest of the page is primed
+     * with what the flash presents there - otherwise the 2BL, which sits right
+     * below the boot ROM, reads back as zeroes. The bank does not change while
+     * this overlay is visible, so priming it once here stays correct.
+     *
+     * The subregion has to be named "xbox.mcpx": xbox_lpc_enable_mcpx_rom()
+     * looks it up by that name to switch the boot ROM off once the 2BL is done
+     * with it, which is why it is added directly rather than by alias. */
     unsigned int page_size = 4096;
     MemoryRegion *mr_mcpx = g_malloc(sizeof(MemoryRegion));
     memory_region_init_ram(mr_mcpx, NULL, "xbox.mcpx", page_size, &err);
-    void *mcpx_data = memory_region_get_ram_ptr(mr_mcpx);
-    memcpy(mcpx_data + page_size - MCPX_SIZE, mcpx_raw, MCPX_SIZE);
-    MemoryRegion *mr_mcpx_alias = g_malloc(sizeof(MemoryRegion));
-    memory_region_init_alias(mr_mcpx_alias, NULL, "xbox.mcpx.alias", mr_mcpx, 0, page_size);
-    memory_region_add_subregion(rom_memory__, -page_size, mr_mcpx_alias);
+    uint8_t *mcpx_data = memory_region_get_ram_ptr(mr_mcpx);
+
+    unsigned int primed = have_bootrom ? page_size - MCPX_SIZE : page_size;
+    for (unsigned int i = 0; i < primed; i++) {
+        hwaddr off = ROM_AREA - page_size + i;
+        off %= XeniumBank[s->bank_control].size;
+        off |= XeniumBank[s->bank_control].offset;
+        mcpx_data[i] = xenium_raw[off];
+    }
+
+    /* Without a boot ROM the whole page stays flash, so the CPU boots straight
+     * from the image's own reset vector. */
+    if (have_bootrom) {
+        memcpy(mcpx_data + page_size - MCPX_SIZE, mcpx_raw, MCPX_SIZE);
+    }
+
+    memory_region_add_subregion_overlap(rom_memory__, -page_size, mr_mcpx, 1);
 
     //Register Xenium Chip IO
     memory_region_init_io(&s->io, OBJECT(s), &xenium_io_ops, s, "xenium.io", 2);   // 0xEE & 0xEF
@@ -674,16 +697,10 @@ static void xenium_class_init(ObjectClass *klass, const void *data)
     device_class_set_props(dc, xenium_properties);
 }
 
-static void xenium_initfn(Object *o)
-{
-    XeniumState *self = XENIUM_DEVICE(o);
-}
-
 static const TypeInfo xenium_type_info = {
     .name          = "modchip-xenium",
     .parent        = TYPE_ISA_DEVICE,
     .instance_size = sizeof(XeniumState),
-    .instance_init = xenium_initfn,
     .class_init    = xenium_class_init,
 };
 
