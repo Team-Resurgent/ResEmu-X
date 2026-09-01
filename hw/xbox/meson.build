@@ -6,6 +6,7 @@ specific_ss.add(files(
 	'eeprom_generation.c',
 	'lpc47m157.c',
 	'smbus_adm1032.c',
+	'smbus_at24c08d.c',
 	'smbus_cx25871.c',
 	'smbus_fs454.c',
 	'smbus_xcalibur.c',
@@ -17,6 +18,7 @@ specific_ss.add(files(
 	'xblc.c',
 	'xid-gamepad.c',
     'modchip_xenium.c',
+	'modchip_xecuter.c',
 	))
 subdir('nv2a')
 subdir('mcpx')
