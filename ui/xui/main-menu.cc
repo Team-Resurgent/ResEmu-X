@@ -1803,6 +1803,14 @@ void MainMenuSystemView::Draw()
                        m_dirty = true;
                    });
     }
+
+    SectionTitle("Display");
+    if (ChevronCombo("LCD", &g_config.sys.lcd,
+                     "None (Default)\0"
+                     "Xecuter\0",
+                     "Attach a character LCD, shown in the Debug LCD window")) {
+        m_dirty = true;
+    }
 }
 
 MainMenuAboutView::MainMenuAboutView() : m_config_info_text{ NULL }

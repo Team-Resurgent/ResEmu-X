@@ -47,6 +47,9 @@
 #define XECUTER_REG_STATUS        0x2
 #define XECUTER_REG_VERSION_2     0x9
 
+/* The display registers at 0x3-0x8 belong to lcd_xecuter.c, which claims them
+ * out of this window when an LCD is attached. */
+
 #define XECUTER_VERSION           0xE1
 #define XECUTER_VERSION_2         0x69
 
@@ -602,7 +605,7 @@ static void xecuter_io_write(void *opaque, hwaddr addr, uint64_t val,
               (xecuter_bank_mask(s, xecuter_get_bank(s)) + 1) / 1024);
         break;
     default:
-        /* Version registers are read-only; the LCD registers are not
+        /* Version registers are read-only; the remaining registers are not
          * emulated. */
         break;
     }

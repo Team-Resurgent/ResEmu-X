@@ -38,6 +38,7 @@ extern "C" {
 #include "qapi/error.h"
 #include "system/runstate.h"
 #include "hw/xbox/mcpx/apu/apu_debug.h"
+#include "hw/xbox/lcd_hd44780.h"
 #include "hw/xbox/nv2a/debug.h"
 #include "hw/xbox/nv2a/nv2a.h"
 

@@ -39,5 +39,14 @@ public:
     void Draw();
 };
 
+class DebugLcdWindow
+{
+public:
+    bool m_is_open;
+    DebugLcdWindow();
+    void Draw();
+};
+
 extern DebugApuWindow apu_window;
 extern DebugVideoWindow video_window;
+extern DebugLcdWindow lcd_window;

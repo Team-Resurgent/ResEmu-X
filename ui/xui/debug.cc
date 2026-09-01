@@ -483,5 +483,144 @@ void DebugVideoWindow::Draw()
     ImGui::PopStyleColor(5);
 }
 
+DebugLcdWindow::DebugLcdWindow() : m_is_open(false)
+{
+}
+
+/* Dot geometry in arbitrary units, in the proportions of the reference panel
+ * preview in Team-Resurgent's X3-LCD-OLED firmware. Only the ratios matter:
+ * the panel is fitted to whatever size the window has been dragged to. */
+#define LCD_DOT           2.0f
+#define LCD_DOT_GAP       1.0f
+#define LCD_CHAR_SPACING  1.5f
+#define LCD_ROW_SPACING   3.0f
+#define LCD_MARGIN        4.0f
+
+#define LCD_UNIT_PITCH  (LCD_DOT + LCD_DOT_GAP)
+#define LCD_UNIT_CELL_W (5 * LCD_UNIT_PITCH + LCD_CHAR_SPACING)
+#define LCD_UNIT_CELL_H \
+    (HD44780_GLYPH_ROWS * LCD_UNIT_PITCH + LCD_ROW_SPACING)
+#define LCD_UNIT_W (HD44780_COLS * LCD_UNIT_CELL_W + 2 * LCD_MARGIN)
+#define LCD_UNIT_H (HD44780_ROWS * LCD_UNIT_CELL_H + 2 * LCD_MARGIN)
+
+void DebugLcdWindow::Draw()
+{
+    if (!m_is_open)
+        return;
+
+    const HD44780State *lcd = hd44780_get_debug_state();
+
+    float scale = g_viewport_mgr.m_scale;
+    ImVec2 frame = ImGui::GetStyle().WindowPadding;
+
+    /* Sized for the font the status line actually draws in, which is taller
+     * than the default one, so the reserved strip always fits it. This is what
+     * GetTextLineHeightWithSpacing computes, but for a font that is not the
+     * current one, and it has to be known before Begin. */
+    float status_h = g_font_mgr.m_fixed_width_font->FontSize +
+                     ImGui::GetStyle().ItemSpacing.y;
+
+    /* The reference size doubles as the floor. Below it the gaps between dots
+     * close up and the matrix reads as solid strokes, so the window only grows
+     * from here. */
+    ImVec2 min_size(LCD_UNIT_W * scale + 2 * frame.x,
+                    LCD_UNIT_H * scale + 2 * frame.y + status_h);
+
+    ImGui::SetNextWindowSize(min_size, ImGuiCond_FirstUseEver);
+    ImGui::SetNextWindowSizeConstraints(min_size, ImVec2(FLT_MAX, FLT_MAX));
+    if (!ImGui::Begin("LCD", &m_is_open,
+                      ImGuiWindowFlags_NoCollapse |
+                          ImGuiWindowFlags_NoScrollbar |
+                          ImGuiWindowFlags_NoScrollWithMouse)) {
+        ImGui::End();
+        return;
+    }
+
+    if (lcd == NULL) {
+        ImGui::TextWrapped("No LCD attached. Select one under "
+                           "Settings, System, then restart.");
+        ImGui::End();
+        return;
+    }
+
+    /* Fit the panel to the window, preserving its aspect so the dots stay
+     * square, and centre whatever slack is left over. */
+    ImVec2 avail = ImGui::GetContentRegionAvail();
+    avail.y -= status_h;
+
+    float zoom = avail.x / LCD_UNIT_W;
+    if (avail.y / LCD_UNIT_H < zoom) {
+        zoom = avail.y / LCD_UNIT_H;
+    }
+    /* Backstop for a window forced below the constraint, by a stale imgui.ini
+     * or a very small display. Clipping the panel beats blurring it away. */
+    if (zoom < 1.0f) {
+        zoom = 1.0f;
+    }
+
+    float dot = LCD_DOT * zoom;
+    float pitch = LCD_UNIT_PITCH * zoom;
+    float cell_w = LCD_UNIT_CELL_W * zoom;
+    float cell_h = LCD_UNIT_CELL_H * zoom;
+    float margin = LCD_MARGIN * zoom;
+
+    /* Brightness arrives on a 0-127 scale and dims the whole panel, lit dots
+     * included, as turning a real one down does. The floor keeps the text
+     * readable at zero rather than leaving a black rectangle. */
+    float brightness = 0.35f + 0.65f * (lcd->backlight / 127.0f);
+
+    ImU32 col_bg = ImColor(0.0f, 0.14f * brightness, 0.26f * brightness, 1.0f);
+    ImU32 col_off = ImColor(0.0f, 0.20f * brightness, 0.34f * brightness, 1.0f);
+    ImU32 col_on = ImColor(0.55f * brightness, 0.95f * brightness,
+                           1.0f * brightness, 1.0f);
+
+    ImDrawList *draw = ImGui::GetWindowDrawList();
+    ImVec2 panel(LCD_UNIT_W * zoom, LCD_UNIT_H * zoom);
+    ImVec2 origin = ImGui::GetCursorScreenPos();
+
+    origin.x += (avail.x - panel.x) * 0.5f;
+    origin.y += (avail.y - panel.y) * 0.5f;
+
+    draw->AddRectFilled(origin, ImVec2(origin.x + panel.x, origin.y + panel.y),
+                        col_bg);
+
+    /* The panel is written from xecuter_io_write on the vCPU thread, which
+     * holds the BQL, and the HUD draws with the BQL held too, so this reads a
+     * consistent snapshot without any locking of its own. */
+    for (int row = 0; row < HD44780_ROWS; row++) {
+        for (int col = 0; col < HD44780_COLS; col++) {
+            uint8_t glyph[HD44780_GLYPH_ROWS];
+
+            hd44780_get_glyph(lcd, lcd->ddram[row][col], glyph);
+
+            for (int y = 0; y < HD44780_GLYPH_ROWS; y++) {
+                for (int x = 0; x < 5; x++) {
+                    /* Bit 4 is the leftmost pixel of each row. */
+                    bool lit = lcd->display_on &&
+                               ((glyph[y] >> (4 - x)) & 1);
+                    ImVec2 p(origin.x + margin + col * cell_w + x * pitch,
+                             origin.y + margin + row * cell_h + y * pitch);
+                    draw->AddRectFilled(p, ImVec2(p.x + dot, p.y + dot),
+                                        lit ? col_on : col_off);
+                }
+            }
+        }
+    }
+
+    ImGui::Dummy(avail);
+
+    ImGui::PushFont(g_font_mgr.m_fixed_width_font);
+    if (!lcd->active) {
+        ImGui::TextUnformatted("Waiting for the guest to drive the display");
+    } else {
+        ImGui::Text("%s  brightness %3d", lcd->display_on ? "ON " : "OFF",
+                    lcd->backlight);
+    }
+    ImGui::PopFont();
+
+    ImGui::End();
+}
+
 DebugApuWindow apu_window;
 DebugVideoWindow video_window;
+DebugLcdWindow lcd_window;
