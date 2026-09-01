@@ -3154,6 +3154,17 @@ void qemu_init(int argc, char **argv)
         }
     }
 
+    // Character LCD. Attached independently of the modchip: the display is its
+    // own device and claims whichever bus it hangs off.
+    switch ((int)g_config.sys.lcd) {
+    case CONFIG_SYS_LCD_XECUTER:
+        fake_argv[fake_argc++] = strdup("-device");
+        fake_argv[fake_argc++] = strdup("lcd-xecuter");
+        break;
+    default:
+        break;
+    }
+
     int mem = ((int)g_config.sys.mem_limit + 1) * 64;
     fake_argv[fake_argc++] = strdup("-m");
     fake_argv[fake_argc++] = g_strdup_printf("%d", mem);
