@@ -366,10 +366,18 @@ sys:
     type: enum
     values: [scart, hdtv, vga, rfu, svideo, composite, none]
     default: hdtv
-  # Emulate the Xenium modchip, loaded with the modchip BIOS below.
-  xenium_enabled:
-    type: bool
-    default: false
+  # Modchip to emulate. Each modchip is loaded with the modchip BIOS below.
+  modchip:
+    type: enum
+    values: [none, xenium, xecuter]
+    default: none
+  # Xecuter only: value of the four bank-select switches, which choose the
+  # active bank until the guest enables soft control.
+  modchip_bank:
+    type: enum
+    values: ['0', '1', '2', '3', '4', '5', '6', '7',
+             '8', '9', '10', '11', '12', '13', '14', '15']
+    default: '15'
   files:
     bootrom_path: string
     flashrom_path: string
@@ -377,6 +385,10 @@ sys:
     hdd_path: string
     dvd_path: string
     modchip_bios_path: string
+    # Xecuter only: on-chip EEPROM, separate from the Xbox EEPROM above.
+    modchip_eeprom_path: string
+    # Xecuter only: secondary (recovery) BIOS image.
+    modchip_recovery_path: string
 
 perf:
   hard_fpu:
