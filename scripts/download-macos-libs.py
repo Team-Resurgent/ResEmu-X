@@ -7,6 +7,7 @@ Downloads required libraries for xemu builds on macOS from MacPorts repositories
 from urllib.request import urlopen
 import re
 import os.path
+import tarfile
 from tarfile import TarFile
 import subprocess
 
@@ -134,7 +135,12 @@ class LibInstaller:
 			assert extracted_path.startswith(self._extract_path), f'tarball has a global file: {fname}'
 
 		print(f'    [*] Extracting to {self._extract_path}')
-		tb.extractall(self._extract_path, numeric_owner=True)
+		# Python 3.14 defaults to the 'data' filter, which rejects the absolute
+		# symlinks some MacPorts packages ship. Containment is asserted above.
+		extract_kwargs = {}
+		if hasattr(tarfile, 'data_filter'):
+			extract_kwargs['filter'] = 'tar'
+		tb.extractall(self._extract_path, numeric_owner=True, **extract_kwargs)
 
 		for fpath in tb.getnames():
 			# FIXME: Symlinks
