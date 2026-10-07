@@ -283,8 +283,36 @@ static void node_free(xdvdfs_node *n, int free_self)
     }
 }
 
+static int host_name_eq(const char *a, const char *b)
+{
 #ifdef _WIN32
-static int scan_dir(xdvdfs_node *dir, int depth)
+    return xdvdfs_casecmp(a, b) == 0;
+#else
+    return strcmp(a, b) == 0;
+#endif
+}
+
+/*
+ * @boot is the chosen .xbe when scanning the root of an xbe-launched image.
+ * That file is presented as default.xbe and any other default.xbe is left
+ * out. Returns the name to publish, or NULL to skip the entry.
+ */
+static const char *entry_name(const char *boot, const char *name, int is_dir)
+{
+    if (!boot) {
+        return name;
+    }
+    if (!is_dir && host_name_eq(name, boot)) {
+        return XDVDFS_DEFAULT_XBE;
+    }
+    if (xdvdfs_casecmp(name, XDVDFS_DEFAULT_XBE) == 0) {
+        return NULL;
+    }
+    return name;
+}
+
+#ifdef _WIN32
+static int scan_dir(xdvdfs_node *dir, int depth, const char *boot)
 {
     wchar_t *wpath, *wpat;
     size_t plen;
@@ -322,6 +350,7 @@ static int scan_dir(xdvdfs_node *dir, int depth)
 
     do {
         char *name, *full;
+        const char *vname;
         xdvdfs_node *child;
         int is_dir;
         uint64_t sz;
@@ -340,12 +369,14 @@ static int scan_dir(xdvdfs_node *dir, int depth)
             ret = XDVDFS_ERR_NOMEM;
             break;
         }
-        if (strlen(name) > XDVDFS_MAX_NAME || child_name_exists(dir, name)) {
+        is_dir = (fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) != 0;
+        vname = entry_name(boot, name, is_dir);
+        if (!vname || strlen(vname) > XDVDFS_MAX_NAME ||
+            child_name_exists(dir, vname)) {
             free(name);
             continue;
         }
 
-        is_dir = (fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) != 0;
         sz = ((uint64_t)fd.nFileSizeHigh << 32) | fd.nFileSizeLow;
         if (!is_dir && sz > UINT32_MAX) {
             free(name);
@@ -359,7 +390,7 @@ static int scan_dir(xdvdfs_node *dir, int depth)
             break;
         }
 
-        child = node_new(name, full, is_dir, is_dir ? 0 : (uint32_t)sz);
+        child = node_new(vname, full, is_dir, is_dir ? 0 : (uint32_t)sz);
         free(name);
         free(full);
         if (!child) {
@@ -372,7 +403,7 @@ static int scan_dir(xdvdfs_node *dir, int depth)
             break;
         }
         if (is_dir) {
-            ret = scan_dir(child, depth + 1);
+            ret = scan_dir(child, depth + 1, NULL);
             if (ret) {
                 break;
             }
@@ -383,7 +414,7 @@ static int scan_dir(xdvdfs_node *dir, int depth)
     return ret;
 }
 #else
-static int scan_dir(xdvdfs_node *dir, int depth)
+static int scan_dir(xdvdfs_node *dir, int depth, const char *boot)
 {
     DIR *d;
     struct dirent *ent;
@@ -400,14 +431,11 @@ static int scan_dir(xdvdfs_node *dir, int depth)
     while ((ent = readdir(d)) != NULL) {
         struct stat st;
         char *full;
+        const char *vname;
         xdvdfs_node *child;
         int is_dir;
 
         if (strcmp(ent->d_name, ".") == 0 || strcmp(ent->d_name, "..") == 0) {
-            continue;
-        }
-        if (strlen(ent->d_name) > XDVDFS_MAX_NAME ||
-            child_name_exists(dir, ent->d_name)) {
             continue;
         }
 
@@ -433,7 +461,14 @@ static int scan_dir(xdvdfs_node *dir, int depth)
             continue;
         }
 
-        child = node_new(ent->d_name, full, is_dir,
+        vname = entry_name(boot, ent->d_name, is_dir);
+        if (!vname || strlen(vname) > XDVDFS_MAX_NAME ||
+            child_name_exists(dir, vname)) {
+            free(full);
+            continue;
+        }
+
+        child = node_new(vname, full, is_dir,
                          is_dir ? 0 : (uint32_t)st.st_size);
         free(full);
         if (!child) {
@@ -446,7 +481,7 @@ static int scan_dir(xdvdfs_node *dir, int depth)
             return XDVDFS_ERR_NOMEM;
         }
         if (is_dir) {
-            int r = scan_dir(child, depth + 1);
+            int r = scan_dir(child, depth + 1, NULL);
             if (r) {
                 closedir(d);
                 return r;
@@ -862,6 +897,33 @@ static int path_is_dir(const char *path)
 #endif
 }
 
+static int path_is_file(const char *path)
+{
+#ifdef _WIN32
+    wchar_t *w = utf8_to_wide(path);
+    DWORD attr;
+    if (!w) {
+        return 0;
+    }
+    attr = GetFileAttributesW(w);
+    free(w);
+    return attr != INVALID_FILE_ATTRIBUTES &&
+           !(attr & FILE_ATTRIBUTE_DIRECTORY);
+#else
+    struct stat st;
+    return stat(path, &st) == 0 && S_ISREG(st.st_mode);
+#endif
+}
+
+static int is_path_sep(char c)
+{
+#ifdef _WIN32
+    return c == '\\' || c == '/';
+#else
+    return c == '/';
+#endif
+}
+
 const char *xdvdfs_strerror(int err)
 {
     switch (err) {
@@ -879,12 +941,14 @@ const char *xdvdfs_strerror(int err)
         return "allocation failed";
     case XDVDFS_ERR_NOTFOUND:
         return "path not found";
+    case XDVDFS_ERR_NOTXBE:
+        return "path is not an .xbe file";
     default:
         return "unknown error";
     }
 }
 
-int xdvdfs_dir_open(xdvdfs_dir **out, const char *path)
+static int dir_open(xdvdfs_dir **out, const char *path, const char *boot)
 {
     xdvdfs_dir *d;
     uint32_t sec;
@@ -925,7 +989,7 @@ int xdvdfs_dir_open(xdvdfs_dir **out, const char *path)
         return XDVDFS_ERR_NOMEM;
     }
 
-    r = scan_dir(&d->root, 0);
+    r = scan_dir(&d->root, 0, boot);
     if (r) {
         xdvdfs_dir_free(d);
         return r;
@@ -977,6 +1041,58 @@ int xdvdfs_dir_open(xdvdfs_dir **out, const char *path)
 
     *out = d;
     return XDVDFS_OK;
+}
+
+int xdvdfs_dir_open(xdvdfs_dir **out, const char *path)
+{
+    return dir_open(out, path, NULL);
+}
+
+int xdvdfs_dir_open_xbe(xdvdfs_dir **out, const char *xbe_path)
+{
+    const char *base;
+    char *parent;
+    size_t plen;
+    int r;
+
+    if (!out || !xbe_path || !xbe_path[0]) {
+        return XDVDFS_ERR_ARG;
+    }
+    *out = NULL;
+
+    if (path_is_dir(xbe_path) || !name_is_xbe(xbe_path)) {
+        return XDVDFS_ERR_NOTXBE;
+    }
+    if (!path_is_file(xbe_path)) {
+        return XDVDFS_ERR_NOTFOUND;
+    }
+
+    base = xbe_path + strlen(xbe_path);
+    while (base > xbe_path && !is_path_sep(base[-1])) {
+        base--;
+    }
+
+    if (base == xbe_path) {
+        parent = xdvdfs_strdup(".");
+    } else {
+        /* Keep the separator for a root parent: "/" or "C:\" */
+        plen = (size_t)(base - xbe_path) - 1;
+        if (plen == 0 || (plen == 2 && xbe_path[1] == ':')) {
+            plen++;
+        }
+        parent = malloc(plen + 1);
+        if (parent) {
+            memcpy(parent, xbe_path, plen);
+            parent[plen] = 0;
+        }
+    }
+    if (!parent) {
+        return XDVDFS_ERR_NOMEM;
+    }
+
+    r = dir_open(out, parent, base);
+    free(parent);
+    return r;
 }
 
 void xdvdfs_dir_free(xdvdfs_dir *d)

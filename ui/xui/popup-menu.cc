@@ -457,6 +457,10 @@ public:
             ActionLoadFolder();
             pop = true;
         }
+        if (PopupMenuButton("Load XBE...", ICON_FA_FILE)) {
+            ActionLoadXbe();
+            pop = true;
+        }
         if (PopupMenuSubmenuButton("Settings", ICON_FA_GEARS)) {
             nav.PushFocus();
             nav.PushMenu(settings);

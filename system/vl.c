@@ -3218,9 +3218,15 @@ void qemu_init(int argc, char **argv)
     }
 
     const char *dvd_path = g_config.sys.files.dvd_path;
-    // Allow overriding the dvd path from command line
+    // Allow overriding the dvd path from command line. -folder-path serves a
+    // folder as a disc; -xbe-path serves an .xbe's folder with that .xbe as
+    // default.xbe.
     for (int i = 1; i < argc; i++) {
-        if (argv[i] && strcmp(argv[i], "-dvd_path") == 0) {
+        if (argv[i] && (strcmp(argv[i], "-dvd_path") == 0 ||
+                        strcmp(argv[i], "-folder-path") == 0 ||
+                        strcmp(argv[i], "--folder-path") == 0 ||
+                        strcmp(argv[i], "-xbe-path") == 0 ||
+                        strcmp(argv[i], "--xbe-path") == 0)) {
             argv[i] = NULL;
             if (i < argc - 1 && argv[i+1]) {
                 dvd_path = argv[i+1];
@@ -3231,10 +3237,12 @@ void qemu_init(int argc, char **argv)
     }
 
     // Always populate DVD drive. If disc path is the empty string, drive is
-    // connected but no media present. A directory is served as a virtual XISO.
+    // connected but no media present. A directory, or an .xbe and its
+    // folder, is served as a virtual XISO.
     fake_argv[fake_argc++] = strdup("-drive");
     char *escaped_dvd_path = strdup_double_commas(dvd_path);
-    if (dvd_path[0] && g_file_test(dvd_path, G_FILE_TEST_IS_DIR)) {
+    if (dvd_path[0] && (g_file_test(dvd_path, G_FILE_TEST_IS_DIR) ||
+                        strisend(dvd_path, ".xbe"))) {
         fake_argv[fake_argc++] = g_strdup_printf(
             "index=1,media=cdrom,file=%s,driver=xdvdfs", escaped_dvd_path);
     } else {

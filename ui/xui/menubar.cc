@@ -142,6 +142,7 @@ void ShowMainMenu()
             if (ImGui::MenuItem("Eject Disc", SHORTCUT_MENU_TEXT(E))) ActionEjectDisc();
             if (ImGui::MenuItem("Load Disc...", SHORTCUT_MENU_TEXT(O))) ActionLoadDisc();
             if (ImGui::MenuItem("Load Folder...")) ActionLoadFolder();
+            if (ImGui::MenuItem("Load XBE...")) ActionLoadXbe();
 
             ImGui::Separator();
 
