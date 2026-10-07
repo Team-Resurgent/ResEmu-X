@@ -123,7 +123,7 @@ jobs:
           path: xemu-macos-${{ matrix.arch }}.zip
 
   release:
-    name: Publish latest
+    name: Publish releases
     needs: [windows, linux, macos]
     runs-on: ubuntu-latest
     steps:
@@ -145,3 +145,30 @@ jobs:
             --notes "Automated build of ${GITHUB_SHA}." \
             --prerelease \
             "${files[@]}"
+      - name: Publish versioned release
+        # Pushing a V* tag with the branch (git push origin teamresurgent V1.0.7)
+        # also publishes "ResEmu-X V1.0.7" from the same build. Tags are
+        # lightweight, so the tag ref points straight at the commit.
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tag=$(gh api "repos/$GITHUB_REPOSITORY/git/matching-refs/tags/V" \
+                  --jq ".[] | select(.object.sha == \"$GITHUB_SHA\") | .ref" \
+                | sed 's#^refs/tags/##' | sort -V | tail -n 1)
+          if [ -z "$tag" ]; then
+            echo "No V* tag on $GITHUB_SHA; only 'latest' was published."
+            exit 0
+          fi
+          shopt -s globstar nullglob
+          files=(artifacts/**/*.zip)
+          if gh release view "$tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release upload "$tag" --repo "$GITHUB_REPOSITORY" --clobber "${files[@]}"
+          else
+            gh release create "$tag" \
+              --repo "$GITHUB_REPOSITORY" \
+              --verify-tag \
+              --title "ResEmu-X $tag" \
+              --generate-notes \
+              --latest \
+              "${files[@]}"
+          fi
