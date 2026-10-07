@@ -61,6 +61,21 @@ void ActionLoadFolder(void)
     });
 }
 
+void ActionLoadXbe(void)
+{
+    static const SDL_DialogFileFilter filters[] = {
+        { "Xbox Executables (*.xbe)", "xbe" },
+        { "All Files", "*" }
+    };
+    const char *default_path = g_config.sys.files.dvd_path;
+    if (!default_path || !default_path[0]) {
+        default_path = g_config.general.games_dir;
+    }
+    ShowOpenFileDialog(filters, 2, default_path, [](const char *path) {
+        ActionLoadDiscFile(path);
+    });
+}
+
 void ActionLoadDiscFile(const char *file_path)
 {
     Error *err = NULL;

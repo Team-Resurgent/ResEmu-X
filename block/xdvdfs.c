@@ -1,6 +1,9 @@
 /*
  * Virtual XISO from a host directory - QEMU block driver.
  *
+ * The filename is either a directory, served as-is, or an .xbe file, in which
+ * case its folder is served with that .xbe presented as default.xbe.
+ *
  * Thin adapter over the in-tree libxdvdfs (libxdvdfs/). The library scans a
  * folder and serves XDVDFS sectors; this file only bridges that to QEMU.
  *
@@ -34,7 +37,7 @@ static QemuOptsList runtime_opts = {
         {
             .name = "filename",
             .type = QEMU_OPT_STRING,
-            .help = "Host directory to present as an XISO",
+            .help = "Host directory, or .xbe in it, to present as an XISO",
         },
         { /* end of list */ }
     },
@@ -95,14 +98,19 @@ static int xdvdfs_open(BlockDriverState *bs, QDict *options, int flags,
 
     dirname = qemu_opt_get(opts, "filename");
     if (!dirname || !dirname[0]) {
-        error_setg(errp, "xdvdfs requires a directory path");
+        error_setg(errp, "xdvdfs requires a directory or .xbe path");
         qemu_opts_del(opts);
         return -EINVAL;
     }
 
     GRAPH_RDLOCK_GUARD_MAINLOOP();
 
-    ret = xdvdfs_dir_open(&s->dir, dirname);
+    if (strisend(dirname, ".xbe") &&
+        !g_file_test(dirname, G_FILE_TEST_IS_DIR)) {
+        ret = xdvdfs_dir_open_xbe(&s->dir, dirname);
+    } else {
+        ret = xdvdfs_dir_open(&s->dir, dirname);
+    }
     if (ret != XDVDFS_OK) {
         error_setg(errp, "XDVDFS: %s (%s)", xdvdfs_strerror(ret), dirname);
         qemu_opts_del(opts);

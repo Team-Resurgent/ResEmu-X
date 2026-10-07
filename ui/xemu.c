@@ -1455,7 +1455,8 @@ void xemu_load_disc(const char *path, Error **errp)
     xbox_smc_eject_button();
     xemu_settings_set_string(&g_config.sys.files.dvd_path, "");
 
-    if (g_file_test(path, G_FILE_TEST_IS_DIR)) {
+    // A folder, or an .xbe whose folder is served with it as default.xbe
+    if (g_file_test(path, G_FILE_TEST_IS_DIR) || strisend(path, ".xbe")) {
         qmp_blockdev_change_medium("ide0-cd1", NULL, path, "xdvdfs", false,
                                    false, false, 0, &error);
     } else if (strisend(path, ".cci")) {

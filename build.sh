@@ -12,6 +12,8 @@ package_windows() {
     rm -rf dist
     mkdir -p dist
     cp build/qemu-system-i386w.exe dist/xemu.exe
+    cp "${project_source_dir}/scripts/windows/register-xbe.ps1" \
+       "${project_source_dir}/scripts/windows/register-xbe.cmd" dist/
     python3 "${project_source_dir}/get_deps.py" dist/xemu.exe dist
 }
 
@@ -19,6 +21,8 @@ package_wincross() {
     rm -rf dist
     mkdir -p dist
     cp build/qemu-system-i386w.exe dist/xemu.exe
+    cp "${project_source_dir}/scripts/windows/register-xbe.ps1" \
+       "${project_source_dir}/scripts/windows/register-xbe.cmd" dist/
     python3 ./scripts/gen-license.py --platform windows > dist/LICENSE.txt
 }
 

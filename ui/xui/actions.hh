@@ -21,6 +21,7 @@
 void ActionEjectDisc();
 void ActionLoadDisc();
 void ActionLoadFolder();
+void ActionLoadXbe();
 void ActionLoadDiscFile(const char *file_path);
 void ActionTogglePause();
 void ActionReset();

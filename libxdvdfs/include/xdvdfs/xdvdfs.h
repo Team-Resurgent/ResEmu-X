@@ -33,7 +33,10 @@ enum {
     XDVDFS_ERR_RANGE    = -4,
     XDVDFS_ERR_NOMEM    = -5,
     XDVDFS_ERR_NOTFOUND = -6,
+    XDVDFS_ERR_NOTXBE   = -7,
 };
+
+#define XDVDFS_DEFAULT_XBE "default.xbe"
 
 const char *xdvdfs_strerror(int err);
 
@@ -41,6 +44,12 @@ typedef struct xdvdfs_dir xdvdfs_dir;
 
 /* Scan @path and build a virtual XISO. Host files are not copied. */
 int xdvdfs_dir_open(xdvdfs_dir **out, const char *path);
+/*
+ * Build a virtual XISO from the folder that holds @xbe_path. The chosen .xbe
+ * appears as default.xbe in the image root, and any other default.xbe in that
+ * folder is left out.
+ */
+int xdvdfs_dir_open_xbe(xdvdfs_dir **out, const char *xbe_path);
 void xdvdfs_dir_free(xdvdfs_dir *d);
 
 uint64_t xdvdfs_dir_sector_count(const xdvdfs_dir *d);

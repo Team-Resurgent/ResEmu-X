@@ -3,6 +3,7 @@
 *.m             diff=objc
 *.py            diff=python text eol=lf
 *.sh            text eol=lf
+*.cmd           text eol=crlf
 *.rs            diff=rust
 *.rs.inc        diff=rust
 Cargo.lock      diff=toml merge=binary
