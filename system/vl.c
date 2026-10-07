@@ -906,6 +906,13 @@ static void help(int exitcode)
            "'disk_image' is a raw hard disk image for IDE hard disk 0\n\n",
             g_get_prgname());
 
+    printf("xemu options:\n"
+           "-dvd_path path  load a disc image, folder or .xbe into the DVD drive\n"
+           "-folder-path dir\n"
+           "                serve a folder as a virtual disc (needs a default.xbe)\n"
+           "-xbe-path file  serve the .xbe's folder as a virtual disc, with that\n"
+           "                .xbe as default.xbe\n\n");
+
 #define DEF(option, opt_arg, opt_enum, opt_help, arch_mask)    \
     if (qemu_arch_available(arch_mask)) \
         fputs(opt_help, stdout);
